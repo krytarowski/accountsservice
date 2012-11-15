@@ -2676,6 +2676,73 @@ act_user_manager_create_user (ActUserManager      *manager,
         return user;
 }
 
+static void
+act_user_manager_async_complete_handler (GObject      *source,
+                                         GAsyncResult *result,
+                                         gpointer      user_data)
+{
+  GTask *task = user_data;
+
+  g_task_return_pointer (task, g_object_ref (result), g_object_unref);
+  g_object_unref (task);
+}
+
+
+void
+act_user_manager_create_user_async (ActUserManager      *manager,
+                                    const char          *username,
+                                    const char          *fullname,
+                                    ActUserAccountType   accounttype,
+                                    GCancellable        *cancellable,
+                                    GAsyncReadyCallback  callback,
+                                    gpointer             user_data)
+{
+        GTask *task;
+
+        g_return_if_fail (ACT_IS_USER_MANAGER (manager));
+        g_return_if_fail (manager->priv->accounts_proxy != NULL);
+
+        g_debug ("ActUserManager: Creating user (async) '%s', '%s', %d",
+                 username, fullname, accounttype);
+
+        g_assert (manager->priv->accounts_proxy != NULL);
+
+        task = g_task_new (manager, cancellable, callback, user_data);
+
+        accounts_accounts_call_create_user (manager->priv->accounts_proxy,
+                                            username,
+                                            fullname,
+                                            accounttype,
+                                            cancellable,
+                                            act_user_manager_async_complete_handler, task);
+}
+
+ActUser *
+act_user_manager_create_user_finish (ActUserManager  *manager,
+                                     GAsyncResult    *result,
+                                     GError         **error)
+{
+        GAsyncResult *inner_result;
+        ActUser *user = NULL;
+        gchar *path;
+        GTask *task;
+
+        g_return_val_if_fail (g_task_is_valid (result, manager), FALSE);
+        task = G_TASK (result);
+        inner_result = g_task_propagate_pointer (task, NULL);
+        g_assert (inner_result);
+
+        if (accounts_accounts_call_create_user_finish (manager->priv->accounts_proxy,
+                                                       &path, inner_result, error)) {
+                user = add_new_user_for_object_path (path, manager);
+                g_free (path);
+        }
+
+        g_object_unref (inner_result);
+
+        return user;
+}
+
 /**
  * act_user_manager_cache_user:
  * @manager: a #ActUserManager
@@ -2715,6 +2782,55 @@ act_user_manager_cache_user (ActUserManager     *manager,
         user = add_new_user_for_object_path (path, manager);
 
         g_free (path);
+
+        return user;
+}
+
+
+void
+act_user_manager_cache_user_async (ActUserManager      *manager,
+                                   const char          *username,
+                                   GCancellable        *cancellable,
+                                   GAsyncReadyCallback  callback,
+                                   gpointer             user_data)
+{
+        GTask *task;
+
+        g_return_if_fail (ACT_IS_USER_MANAGER (manager));
+        g_return_if_fail (manager->priv->accounts_proxy != NULL);
+
+        g_debug ("ActUserManager: Caching user (async) '%s'", username);
+
+        task = g_task_new (manager, cancellable, callback, user_data);
+
+        accounts_accounts_call_cache_user (manager->priv->accounts_proxy,
+                                           username,
+                                           cancellable,
+                                           act_user_manager_async_complete_handler, task);
+}
+
+ActUser *
+act_user_manager_cache_user_finish (ActUserManager  *manager,
+                                     GAsyncResult    *result,
+                                     GError         **error)
+{
+        GAsyncResult *inner_result;
+        ActUser *user = NULL;
+        gchar *path;
+        GTask *task;
+
+        g_return_val_if_fail (g_task_is_valid (result, manager), FALSE);
+        task = G_TASK (result);
+        inner_result = g_task_propagate_pointer (task, NULL);
+        g_assert (inner_result);
+
+        if (accounts_accounts_call_cache_user_finish (manager->priv->accounts_proxy,
+                                                      &path, inner_result, error)) {
+                user = add_new_user_for_object_path (path, manager);
+                g_free (path);
+        }
+
+        g_object_unref (inner_result);
 
         return user;
 }
@@ -2786,3 +2902,47 @@ act_user_manager_delete_user (ActUserManager  *manager,
         return res;
 }
 
+void
+act_user_manager_delete_user_async (ActUserManager      *manager,
+                                    ActUser             *user,
+                                    gboolean             remove_files,
+                                    GCancellable        *cancellable,
+                                    GAsyncReadyCallback  callback,
+                                    gpointer             user_data)
+{
+        GTask *task;
+
+        task = g_task_new (manager, cancellable, callback, user_data);
+
+        g_debug ("ActUserManager: Deleting (async) user '%s' (uid %ld)", act_user_get_user_name (user), (long) act_user_get_uid (user));
+
+        g_return_if_fail (ACT_IS_USER_MANAGER (manager));
+        g_return_if_fail (ACT_IS_USER (user));
+        g_return_if_fail (manager->priv->accounts_proxy != NULL);
+
+        accounts_accounts_call_delete_user (manager->priv->accounts_proxy,
+                                            act_user_get_uid (user), remove_files,
+                                            cancellable,
+                                            act_user_manager_async_complete_handler, task);
+}
+
+gboolean
+act_user_manager_delete_user_finish (ActUserManager  *manager,
+                                     GAsyncResult    *result,
+                                     GError         **error)
+{
+        GAsyncResult *inner_result;
+        gboolean success;
+        GTask *task;
+
+        g_return_val_if_fail (g_task_is_valid (result, manager), FALSE);
+        task = G_TASK (result);
+        inner_result = g_task_propagate_pointer (task, NULL);
+        g_assert (inner_result);
+
+        success = accounts_accounts_call_delete_user_finish (manager->priv->accounts_proxy,
+                                                             inner_result, error);
+        g_object_unref (inner_result);
+
+        return success;
+}
