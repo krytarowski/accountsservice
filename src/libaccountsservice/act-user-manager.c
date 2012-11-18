@@ -2687,7 +2687,25 @@ act_user_manager_async_complete_handler (GObject      *source,
   g_object_unref (task);
 }
 
-
+/**
+ * act_user_manager_create_user_async:
+ * @manager: a #ActUserManager
+ * @username: a unix user name
+ * @fullname: a unix GECOS value
+ * @accounttype: a #ActUserAccountType
+ * @cancellable: (allow-none): optional #GCancellable object,
+ *     %NULL to ignore
+ * @callback: (scope async): a #GAsyncReadyCallback to call
+ *     when the request is satisfied
+ * @user_data (closure): the data to pass to @callback
+ *
+ * Asynchronously creates a user account on the system.
+ *
+ * For more details, see act_user_manager_create_user(), which
+ * is the synchronous version of this call.
+ *
+ * Since: 0.6.27
+ */
 void
 act_user_manager_create_user_async (ActUserManager      *manager,
                                     const char          *username,
@@ -2717,6 +2735,20 @@ act_user_manager_create_user_async (ActUserManager      *manager,
                                             act_user_manager_async_complete_handler, task);
 }
 
+/**
+ * act_user_manager_create_user_finish:
+ * @manager: a #ActUserManager
+ * @result: a #GAsyncResult
+ * @error: a #GError
+ *
+ * Finishes an asynchronous user creation.
+ *
+ * See act_user_manager_create_user_async().
+ *
+ * Returns: (transfer full): user object
+ *
+ * Since: 0.6.27
+ */
 ActUser *
 act_user_manager_create_user_finish (ActUserManager  *manager,
                                      GAsyncResult    *result,
@@ -2787,6 +2819,25 @@ act_user_manager_cache_user (ActUserManager     *manager,
 }
 
 
+/**
+ * act_user_manager_cache_user_async:
+ * @manager: a #ActUserManager
+ * @username: a unix user name
+ * @accounttype: a #ActUserAccountType
+ * @cancellable: (allow-none): optional #GCancellable object,
+ *     %NULL to ignore
+ * @callback: (scope async): a #GAsyncReadyCallback to call
+ *     when the request is satisfied
+ * @user_data (closure): the data to pass to @callback
+ *
+ * Asynchronously caches a user account so it shows up via
+ * act_user_manager_list_users().
+ *
+ * For more details, see act_user_manager_cache_user(), which
+ * is the synchronous version of this call.
+ *
+ * Since: 0.6.27
+ */
 void
 act_user_manager_cache_user_async (ActUserManager      *manager,
                                    const char          *username,
@@ -2809,6 +2860,20 @@ act_user_manager_cache_user_async (ActUserManager      *manager,
                                            act_user_manager_async_complete_handler, task);
 }
 
+/**
+ * act_user_manager_cache_user_finish:
+ * @manager: a #ActUserManager
+ * @result: a #GAsyncResult
+ * @error: a #GError
+ *
+ * Finishes an asynchronous user caching.
+ *
+ * See act_user_manager_cache_user_async().
+ *
+ * Returns: (transfer full): user object
+ *
+ * Since: 0.6.27
+ */
 ActUser *
 act_user_manager_cache_user_finish (ActUserManager  *manager,
                                      GAsyncResult    *result,
@@ -2874,6 +2939,17 @@ act_user_manager_uncache_user (ActUserManager     *manager,
         return TRUE;
 }
 
+/**
+ * act_user_manager_delete_user:
+ * @manager: a #ActUserManager
+ * @user: an #ActUser object
+ * @remove_files: %TRUE to delete the users home directory
+ * @error: a #GError
+ *
+ * Deletes a user account on the system.
+ *
+ * Returns: %TRUE if the user account was successfully deleted
+ */
 gboolean
 act_user_manager_delete_user (ActUserManager  *manager,
                               ActUser         *user,
@@ -2902,6 +2978,24 @@ act_user_manager_delete_user (ActUserManager  *manager,
         return res;
 }
 
+/**
+ * act_user_manager_delete_user_async:
+ * @manager: a #ActUserManager
+ * @user: a #ActUser object
+ * @remove_files: %TRUE to delete the users home directory
+ * @cancellable: (allow-none): optional #GCancellable object,
+ *     %NULL to ignore
+ * @callback: (scope async): a #GAsyncReadyCallback to call
+ *     when the request is satisfied
+ * @user_data (closure): the data to pass to @callback
+ *
+ * Asynchronously deletes a user account from the system.
+ *
+ * For more details, see act_user_manager_delete_user(), which
+ * is the synchronous version of this call.
+ *
+ * Since: 0.6.27
+ */
 void
 act_user_manager_delete_user_async (ActUserManager      *manager,
                                     ActUser             *user,
@@ -2926,6 +3020,20 @@ act_user_manager_delete_user_async (ActUserManager      *manager,
                                             act_user_manager_async_complete_handler, task);
 }
 
+/**
+ * act_user_manager_delete_user_finish:
+ * @manager: a #ActUserManager
+ * @result: a #GAsyncResult
+ * @error: a #GError
+ *
+ * Finishes an asynchronous user account deletion.
+ *
+ * See act_user_manager_delete_user_async().
+ *
+ * Returns: %TRUE if the user account was successfully deleted
+ *
+ * Since: 0.6.27
+ */
 gboolean
 act_user_manager_delete_user_finish (ActUserManager  *manager,
                                      GAsyncResult    *result,
