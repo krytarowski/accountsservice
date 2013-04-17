@@ -1,6 +1,7 @@
 /* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 8 -*-
  *
  * Copyright (C) 2009-2010 Red Hat, Inc.
+ * Copyright (c) 2013 Canonical Limited
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -110,6 +111,7 @@ struct DaemonPrivate {
         guint autologin_id;
 
         PolkitAuthority *authority;
+        GHashTable *extension_ifaces;
 };
 
 typedef struct passwd * (* EntryGeneratorFunc) (GHashTable *, gpointer *);
@@ -757,6 +759,8 @@ daemon_init (Daemon *daemon)
                                                           g_free,
                                                           NULL);
 
+        daemon->priv->extension_ifaces = daemon_read_extension_ifaces ();
+
         for (i = 0; default_excludes[i] != NULL; i++) {
                 g_hash_table_insert (daemon->priv->exclusions,
                                      g_strdup (default_excludes[i]),
@@ -851,6 +855,8 @@ daemon_finalize (GObject *object)
                 g_object_unref (daemon->priv->bus_connection);
 
         g_hash_table_destroy (daemon->priv->users);
+
+        g_hash_table_unref (daemon->priv->extension_ifaces);
 
         G_OBJECT_CLASS (daemon_parent_class)->finalize (object);
 }
@@ -1673,6 +1679,12 @@ daemon_local_set_automatic_login (Daemon    *daemon,
         }
 
         return TRUE;
+}
+
+GHashTable *
+daemon_get_extension_ifaces (Daemon *daemon)
+{
+  return daemon->priv->extension_ifaces;
 }
 
 static void
