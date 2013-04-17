@@ -78,6 +78,8 @@ struct User {
 
         Daemon       *daemon;
 
+        GKeyFile     *keyfile;
+
         uid_t         uid;
         gid_t         gid;
         gchar        *user_name;
@@ -360,6 +362,9 @@ user_update_from_keyfile (User     *user,
             }
         }
 
+        g_clear_pointer (&user->keyfile, g_key_file_unref);
+        user->keyfile = g_key_file_ref (keyfile);
+
         g_object_thaw_notify (G_OBJECT (user));
 }
 
@@ -387,6 +392,8 @@ static void
 user_save_to_keyfile (User     *user,
                       GKeyFile *keyfile)
 {
+        g_key_file_remove_group (keyfile, "User", NULL);
+
         if (user->email)
                 g_key_file_set_string (keyfile, "User", "Email", user->email);
 
@@ -412,15 +419,13 @@ static void
 save_extra_data (User *user)
 {
         gchar *filename;
-        GKeyFile *keyfile;
         gchar *data;
         GError *error;
 
-        keyfile = g_key_file_new ();
-        user_save_to_keyfile (user, keyfile);
+        user_save_to_keyfile (user, user->keyfile);
 
         error = NULL;
-        data = g_key_file_to_data (keyfile, NULL, &error);
+        data = g_key_file_to_data (user->keyfile, NULL, &error);
         if (error == NULL) {
                 filename = g_build_filename (USERDIR,
                                              user->user_name,
@@ -433,7 +438,6 @@ save_extra_data (User *user)
                            user->user_name, error->message);
                 g_error_free (error);
         }
-        g_key_file_free (keyfile);
 }
 
 static void
@@ -1816,6 +1820,8 @@ user_finalize (GObject *object)
 
         user = USER (object);
 
+        g_clear_pointer (&user->keyfile, g_key_file_unref);
+
         g_free (user->object_path);
         g_free (user->user_name);
         g_free (user->real_name);
@@ -2034,4 +2040,5 @@ user_init (User *user)
         user->automatic_login = FALSE;
         user->system_account = FALSE;
         user->login_history = NULL;
+        user->keyfile = g_key_file_new ();
 }

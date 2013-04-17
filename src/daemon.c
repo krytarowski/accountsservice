@@ -491,7 +491,7 @@ entry_generator_cachedir (GHashTable *users,
                 key_file = g_key_file_new ();
                 if (g_key_file_load_from_file (key_file, filename, 0, NULL))
                         user_update_from_keyfile (user, key_file);
-                g_key_file_free (key_file);
+                g_key_file_unref (key_file);
                 g_free (filename);
         }
 
