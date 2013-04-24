@@ -61,6 +61,26 @@ AC_ARG_ENABLE(user-heuristics,
         fi])
 
 dnl ---------------------------------------------------------------------------
+dnl - coverage
+dnl ---------------------------------------------------------------------------
+
+AC_MSG_CHECKING([whether to build with gcov testing])
+AC_ARG_ENABLE([coverage],
+              AS_HELP_STRING([--enable-coverage],
+                             [Whether to enable gcov code coverage]),
+              [], [enable_coverage=no])
+AC_MSG_RESULT([$enable_coverage])
+
+if test "$enable_coverage" = "yes"; then
+	if test "$GCC" != "yes"; then
+		AC_MSG_ERROR(Coverage testing requires GCC)
+	fi
+	CFLAGS="$CFLAGS -O0 -g --coverage"
+fi
+
+AM_CONDITIONAL([WITH_COVERAGE], [test "$enable_coverage" = "yes"])
+
+dnl ---------------------------------------------------------------------------
 dnl - Warnings
 dnl ---------------------------------------------------------------------------
 

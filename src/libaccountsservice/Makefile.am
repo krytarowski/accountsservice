@@ -1,7 +1,10 @@
 END_OF_LIST =
 
 BUILT_SOURCES = $(END_OF_LIST)
-CLEANFILES = $(END_OF_LIST)
+CLEANFILES = \
+	*.gcda \
+	*.gcno \
+	$(END_OF_LIST)
 
 AM_CPPFLAGS = \
         -I.                                                                   \
