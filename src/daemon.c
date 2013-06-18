@@ -642,83 +642,65 @@ on_gdm_monitor_changed (GFileMonitor      *monitor,
         queue_reload_autologin (daemon);
 }
 
+typedef void FileChangeCallback (GFileMonitor      *monitor,
+                                 GFile             *file,
+                                 GFile             *other_file,
+                                 GFileMonitorEvent  event_type,
+                                 Daemon            *daemon);
+
+static GFileMonitor *
+setup_monitor (Daemon             *daemon,
+               const gchar        *path,
+               FileChangeCallback *callback)
+{
+        GError *error = NULL;
+        GFile *file;
+        GFileMonitor *monitor;
+
+        file = g_file_new_for_path (path);
+        monitor = g_file_monitor_file (file,
+                                       G_FILE_MONITOR_NONE,
+                                       NULL,
+                                       &error);
+        if (monitor != NULL) {
+                g_signal_connect (monitor,
+                                  "changed",
+                                  G_CALLBACK (callback),
+                                  daemon);
+        } else {
+                g_warning ("Unable to monitor %s: %s", path, error->message);
+                g_error_free (error);
+        }
+        g_object_unref (file);
+
+        return monitor;
+}
+
 static void
 daemon_init (Daemon *daemon)
 {
-        GFile *file;
-        GError *error;
-
         daemon->priv = DAEMON_GET_PRIVATE (daemon);
 
         daemon->priv->extension_ifaces = daemon_read_extension_ifaces ();
 
         daemon->priv->users = create_users_hash_table ();
 
-        file = g_file_new_for_path (PATH_PASSWD);
-        daemon->priv->passwd_monitor = g_file_monitor_file (file,
-                                                            G_FILE_MONITOR_NONE,
-                                                            NULL,
-                                                            &error);
-        if (daemon->priv->passwd_monitor != NULL) {
-                g_signal_connect (daemon->priv->passwd_monitor,
-                                  "changed",
-                                  G_CALLBACK (on_users_monitor_changed),
-                                  daemon);
-        } else {
-                g_warning ("Unable to monitor %s: %s", PATH_PASSWD, error->message);
-                g_error_free (error);
-        }
-        g_object_unref (file);
-
-        file = g_file_new_for_path (PATH_SHADOW);
-        daemon->priv->shadow_monitor = g_file_monitor_file (file,
-                                                            G_FILE_MONITOR_NONE,
-                                                            NULL,
-                                                            &error);
-        if (daemon->priv->shadow_monitor != NULL) {
-                g_signal_connect (daemon->priv->shadow_monitor,
-                                  "changed",
-                                  G_CALLBACK (on_users_monitor_changed),
-                                  daemon);
-        } else {
-                g_warning ("Unable to monitor %s: %s", PATH_SHADOW, error->message);
-                g_error_free (error);
-        }
-        g_object_unref (file);
+        daemon->priv->passwd_monitor = setup_monitor (daemon,
+                                                      PATH_PASSWD,
+                                                      on_users_monitor_changed);
+        daemon->priv->shadow_monitor = setup_monitor (daemon,
+                                                      PATH_SHADOW,
+                                                      on_users_monitor_changed);
 
 #ifdef HAVE_UTMPX_H
-        file = g_file_new_for_path (PATH_WTMP);
-        daemon->priv->wtmp_monitor = g_file_monitor_file (file,
-                                                           G_FILE_MONITOR_NONE,
-                                                           NULL,
-                                                           &error);
-        if (daemon->priv->wtmp_monitor != NULL) {
-                g_signal_connect (daemon->priv->wtmp_monitor,
-                                  "changed",
-                                  G_CALLBACK (on_users_monitor_changed),
-                                  daemon);
-        } else {
-                g_warning ("Unable to monitor %s: %s", PATH_WTMP, error->message);
-                g_error_free (error);
-        }
-        g_object_unref (file);
+        daemon->priv->wtmp_monitor = setup_monitor (daemon,
+                                                    PATH_WTMP,
+                                                    on_users_monitor_changed);
 #endif
 
-        file = g_file_new_for_path (PATH_GDM_CUSTOM);
-        daemon->priv->gdm_monitor = g_file_monitor_file (file,
-                                                         G_FILE_MONITOR_NONE,
-                                                         NULL,
-                                                         &error);
-        if (daemon->priv->gdm_monitor != NULL) {
-                g_signal_connect (daemon->priv->gdm_monitor,
-                                  "changed",
-                                  G_CALLBACK (on_gdm_monitor_changed),
-                                  daemon);
-        } else {
-                g_warning ("Unable to monitor %s: %s", PATH_GDM_CUSTOM, error->message);
-                g_error_free (error);
-        }
-        g_object_unref (file);
+        daemon->priv->gdm_monitor = setup_monitor (daemon,
+                                                   PATH_GDM_CUSTOM,
+                                                   on_gdm_monitor_changed);
 
         queue_reload_users (daemon);
         queue_reload_autologin (daemon);
