@@ -165,6 +165,7 @@ user_update_from_pwent (User          *user,
         const gchar *passwd;
         gboolean locked;
         PasswordMode mode;
+        AccountType account_type;
 
         g_object_freeze_notify (G_OBJECT (user));
 
@@ -223,7 +224,12 @@ user_update_from_pwent (User          *user,
         /* GID */
         user->gid = pwent->pw_gid;
 
-        user->account_type = account_type_from_pwent (pwent);
+        account_type = account_type_from_pwent (pwent);
+        if (account_type != user->account_type) {
+                user->account_type = account_type;
+                changed = TRUE;
+                g_object_notify (G_OBJECT (user), "account-type");
+        }
 
         /* Username */
         if (g_strcmp0 (user->user_name, pwent->pw_name) != 0) {
