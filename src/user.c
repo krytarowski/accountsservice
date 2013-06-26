@@ -42,6 +42,7 @@
 #include <gio/gunixinputstream.h>
 #include <polkit/polkit.h>
 
+#include "user-classify.h"
 #include "daemon.h"
 #include "user.h"
 #include "accounts-user-generated.h"
@@ -291,13 +292,7 @@ user_update_from_pwent (User          *user,
                 g_object_notify (G_OBJECT (user), "password-mode");
         }
 
-        /* FIXME: this relies on heuristics that don't always come out
-         * right.
-         */
-        user->system_account = daemon_local_user_is_excluded (user->daemon,
-                                                              user->user_name,
-                                                              pwent->pw_shell,
-                                                              passwd);
+        user->system_account = !user_classify_is_human (user->uid, user->user_name, pwent->pw_shell, passwd);
 
         g_object_thaw_notify (G_OBJECT (user));
 

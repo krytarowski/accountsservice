@@ -43,48 +43,16 @@
 #include <gio/gio.h>
 #include <polkit/polkit.h>
 
+#include "user-classify.h"
 #include "daemon.h"
 #include "util.h"
 
 #define PATH_PASSWD "/etc/passwd"
 #define PATH_SHADOW "/etc/shadow"
-#define PATH_NOLOGIN "/sbin/nologin"
-#define PATH_FALSE "/bin/false"
 #define PATH_GDM_CUSTOM "/etc/gdm/custom.conf"
 #ifdef HAVE_UTMPX_H
 #define PATH_WTMP _PATH_WTMPX
 #endif
-
-static const char *default_excludes[] = {
-        "bin",
-        "root",
-        "daemon",
-        "adm",
-        "lp",
-        "sync",
-        "shutdown",
-        "halt",
-        "mail",
-        "news",
-        "uucp",
-        "operator",
-        "nobody",
-        "nobody4",
-        "noaccess",
-        "postgres",
-        "pvm",
-        "rpm",
-        "nfsnobody",
-        "pcap",
-        "mysql",
-        "ftp",
-        "games",
-        "man",
-        "at",
-        "gdm",
-        "gnome-initial-setup",
-        NULL
-};
 
 enum {
         PROP_0,
@@ -96,7 +64,6 @@ struct DaemonPrivate {
         GDBusProxy *bus_proxy;
 
         GHashTable *users;
-        GHashTable *exclusions;
 
         User *autologin;
 
@@ -165,78 +132,6 @@ error_get_type (void)
       etype = g_enum_register_static ("Error", values);
     }
   return etype;
-}
-
-gboolean
-daemon_local_user_is_excluded (Daemon      *daemon,
-                               const gchar *username,
-                               const gchar *shell,
-                               const gchar *password_hash)
-{
-        int ret;
-
-        if (g_hash_table_lookup (daemon->priv->exclusions, username)) {
-                return TRUE;
-        }
-
-        ret = FALSE;
-
-        if (shell != NULL) {
-                char *basename, *nologin_basename, *false_basename;
-
-#ifdef HAVE_GETUSERSHELL
-                char *valid_shell;
-
-                ret = TRUE;
-                setusershell ();
-                while ((valid_shell = getusershell ()) != NULL) {
-                        if (g_strcmp0 (shell, valid_shell) != 0)
-                                continue;
-                        ret = FALSE;
-                }
-                endusershell ();
-#endif
-
-                basename = g_path_get_basename (shell);
-                nologin_basename = g_path_get_basename (PATH_NOLOGIN);
-                false_basename = g_path_get_basename (PATH_FALSE);
-
-                if (shell[0] == '\0') {
-                        ret = TRUE;
-                } else if (g_strcmp0 (basename, nologin_basename) == 0) {
-                        ret = TRUE;
-                } else if (g_strcmp0 (basename, false_basename) == 0) {
-                        ret = TRUE;
-                }
-
-                g_free (basename);
-                g_free (nologin_basename);
-                g_free (false_basename);
-        }
-
-        if (password_hash != NULL) {
-                /* skip over the account-is-locked '!' prefix if present */
-                if (password_hash[0] == '!')
-                    password_hash++;
-
-                if (password_hash[0] != '\0') {
-                        /* modern hashes start with "$n$" */
-                        if (password_hash[0] == '$') {
-                                if (strlen (password_hash) < 4)
-                                    ret = TRUE;
-
-                        /* DES crypt is base64 encoded [./A-Za-z0-9]*
-                         */
-                        } else if (!g_ascii_isalnum (password_hash[0]) &&
-                                   password_hash[0] != '.' &&
-                                   password_hash[0] != '/') {
-                                ret = TRUE;
-                        }
-                }
-
-        }
-
-        return ret;
 }
 
 #ifdef HAVE_UTMPX_H
@@ -520,7 +415,7 @@ load_entries (Daemon             *daemon,
                         break;
 
                 /* Skip system users... */
-                if (daemon_local_user_is_excluded (daemon, pwent->pw_name, pwent->pw_shell, NULL)) {
+                if (!user_classify_is_human (pwent->pw_uid, pwent->pw_name, pwent->pw_shell, NULL)) {
                         g_debug ("skipping user: %s", pwent->pw_name);
                         continue;
                 }
@@ -750,24 +645,12 @@ on_gdm_monitor_changed (GFileMonitor      *monitor,
 static void
 daemon_init (Daemon *daemon)
 {
-        gint i;
         GFile *file;
         GError *error;
 
         daemon->priv = DAEMON_GET_PRIVATE (daemon);
 
-        daemon->priv->exclusions = g_hash_table_new_full (g_str_hash,
-                                                          g_str_equal,
-                                                          g_free,
-                                                          NULL);
-
         daemon->priv->extension_ifaces = daemon_read_extension_ifaces ();
-
-        for (i = 0; default_excludes[i] != NULL; i++) {
-                g_hash_table_insert (daemon->priv->exclusions,
-                                     g_strdup (default_excludes[i]),
-                                     GUINT_TO_POINTER (TRUE));
-        }
 
         daemon->priv->users = create_users_hash_table ();
 
@@ -1092,7 +975,7 @@ finish_list_cached_users (gpointer user_data)
                 uid = user_get_uid (user);
                 shell = user_get_shell (user);
 
-                if (daemon_local_user_is_excluded (data->daemon, name, shell, NULL)) {
+                if (!user_classify_is_human (uid, name, shell, NULL)) {
                         g_debug ("user %s %ld excluded", name, (long) uid);
                         continue;
                 }

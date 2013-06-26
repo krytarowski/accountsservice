@@ -54,6 +54,12 @@ AS_IF([test x$enable_admin_group = xauto], [
 ])
 AC_DEFINE_UNQUOTED([ADMIN_GROUP], ["$enable_admin_group"], [Define to the group for administrator users])
 
+AC_ARG_ENABLE(user-heuristics,
+        [AS_HELP_STRING([--enable-user-heuristics],[Enable heuristics for guessing system vs. human users])],
+        [if test "$enableval" = yes; then
+           AC_DEFINE([ENABLE_USER_HEURISTICS], , [System vs. human user heuristics enabled])
+        fi])
+
 dnl ---------------------------------------------------------------------------
 dnl - Warnings
 dnl ---------------------------------------------------------------------------
