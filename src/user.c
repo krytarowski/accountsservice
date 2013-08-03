@@ -2144,6 +2144,8 @@ user_set_property (GObject      *object,
                 user->login_time = g_value_get_int64 (value);
                 break;
         case PROP_LOGIN_HISTORY:
+                if (user->login_history)
+                        g_variant_unref (user->login_history);
                 user->login_history = g_variant_ref (g_value_get_variant (value));
                 break;
         case PROP_AUTOMATIC_LOGIN:
