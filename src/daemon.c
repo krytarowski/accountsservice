@@ -258,6 +258,13 @@ typedef struct {
         GHashTable *logout_hash;
 } WTmpGeneratorState;
 
+static void
+user_previous_login_free (UserPreviousLogin *previous_login)
+{
+        g_free (previous_login->id);
+        g_free (previous_login);
+}
+
 static struct passwd *
 entry_generator_wtmp (GHashTable *users,
                       gpointer   *state)
@@ -367,11 +374,7 @@ entry_generator_wtmp (GHashTable *users,
 
                 user = g_hash_table_lookup (users, key);
                 if (user == NULL) {
-                        for (l = accounting->previous_logins; l != NULL; l = l->next) {
-                                previous_login = l->data;
-                                g_free (previous_login->id);
-                        }
-                        g_list_free (accounting->previous_logins);
+                        g_list_free_full (accounting->previous_logins, (GDestroyNotify) user_previous_login_free);
                         continue;
                 }
 
@@ -386,11 +389,10 @@ entry_generator_wtmp (GHashTable *users,
                         g_variant_builder_add (builder2, "{sv}", "type", g_variant_new_string (previous_login->id));
                         g_variant_builder_add (builder, "(xxa{sv})", previous_login->login_time, previous_login->logout_time, builder2);
                         g_variant_builder_unref (builder2);
-                        g_free (previous_login->id);
                 }
                 g_object_set (user, "login-history", g_variant_new ("a(xxa{sv})", builder), NULL);
                 g_variant_builder_unref (builder);
-                g_list_free (accounting->previous_logins);
+                g_list_free_full (accounting->previous_logins, (GDestroyNotify) user_previous_login_free);
 
                 user_changed (user);
         }
