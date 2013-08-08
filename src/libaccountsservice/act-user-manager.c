@@ -1178,6 +1178,28 @@ get_current_session_id (ActUserManager *manager)
                 return;
         }
 #endif
+
+        if (manager->priv->ck_manager_proxy == NULL) {
+                GError *error = NULL;
+
+                manager->priv->ck_manager_proxy = console_kit_manager_proxy_new_sync (manager->priv->connection,
+                                                                                      G_DBUS_PROXY_FLAGS_NONE,
+                                                                                      CK_NAME,
+                                                                                      CK_MANAGER_PATH,
+                                                                                      NULL,
+                                                                                      &error);
+                if (manager->priv->ck_manager_proxy == NULL) {
+                        if (error != NULL) {
+                                g_warning ("Failed to create ConsoleKit proxy: %s", error->message);
+                                g_error_free (error);
+                        } else {
+                                g_warning ("Failed to create_ConsoleKit_proxy");
+                        }
+                        unload_seat (manager);
+                        return;
+                }
+        }
+
         console_kit_manager_call_get_current_session (manager->priv->ck_manager_proxy, NULL,
                                                       on_get_current_session_finished,
                                                       g_object_ref (manager));
@@ -2812,22 +2834,6 @@ act_user_manager_init (ActUserManager *manager)
                           "user-deleted",
                           G_CALLBACK (on_user_removed_in_accounts_service),
                           manager);
-
-        manager->priv->ck_manager_proxy = console_kit_manager_proxy_new_sync (manager->priv->connection,
-                                                                              G_DBUS_PROXY_FLAGS_NONE,
-                                                                              CK_NAME,
-                                                                              CK_MANAGER_PATH,
-                                                                              NULL,
-                                                                              &error);
-        if (manager->priv->ck_manager_proxy == NULL) {
-                if (error != NULL) {
-                        g_warning ("Failed to create ConsoleKit proxy: %s", error->message);
-                        g_error_free (error);
-                } else {
-                        g_warning ("Failed to create_ConsoleKit_proxy");
-                }
-                return;
-        }
 
         manager->priv->seat.state = ACT_USER_MANAGER_SEAT_STATE_UNLOADED;
 }
