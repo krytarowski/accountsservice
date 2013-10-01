@@ -271,7 +271,7 @@ user_update_from_pwent (User          *user,
                 g_object_notify (G_OBJECT (user), "locked");
         }
 
-        if (passwd && passwd[0] != 0) {
+        if (passwd == NULL || passwd[0] != 0) {
                 mode = PASSWORD_MODE_REGULAR;
         }
         else {
