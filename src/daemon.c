@@ -49,6 +49,7 @@
 
 #define PATH_PASSWD "/etc/passwd"
 #define PATH_SHADOW "/etc/shadow"
+#define PATH_GROUP "/etc/group"
 #define PATH_GDM_CUSTOM "/etc/gdm/custom.conf"
 #ifdef HAVE_UTMPX_H
 #define PATH_WTMP _PATH_WTMPX
@@ -69,6 +70,7 @@ struct DaemonPrivate {
 
         GFileMonitor *passwd_monitor;
         GFileMonitor *shadow_monitor;
+        GFileMonitor *group_monitor;
         GFileMonitor *gdm_monitor;
 #ifdef HAVE_UTMPX_H
         GFileMonitor *wtmp_monitor;
@@ -691,6 +693,9 @@ daemon_init (Daemon *daemon)
         daemon->priv->shadow_monitor = setup_monitor (daemon,
                                                       PATH_SHADOW,
                                                       on_users_monitor_changed);
+        daemon->priv->group_monitor = setup_monitor (daemon,
+                                                     PATH_GROUP,
+                                                     on_users_monitor_changed);
 
 #ifdef HAVE_UTMPX_H
         daemon->priv->wtmp_monitor = setup_monitor (daemon,
