@@ -61,7 +61,9 @@ CLEANFILES += $(BUILT_SOURCES)
 
 libaccountsservicedir = $(includedir)/accountsservice-1.0/act
 libaccountsservice_headers =                                                  \
+        act-types.h                                                           \
         act-user.h                                                            \
+        act-group.h                                                           \
         act-user-manager.h                                                    \
         act-user-enum-types.h                                                 \
         $(END_OF_LIST)
@@ -80,7 +82,7 @@ libaccountsservice_la_LDFLAGS =                                               \
         $(END_OF_LIST)
 
 libaccountsservice_la_LIBADD =                                                \
-	../libaccounts-generated.la						\
+	../libaccounts-generated.la					      \
         $(LIBACCOUNTSSERVICE_LIBS)                                            \
         -lcrypt                                                               \
         $(END_OF_LIST)
@@ -88,12 +90,15 @@ libaccountsservice_la_LIBADD =                                                \
 libaccountsservice_la_sources =                                               \
         $(libaccountsservice_headers)                                         \
         act-user.c                                                            \
+        act-group.c                                                           \
         act-user-manager.c                                                    \
         $(END_OF_LIST)
 
 libaccountsservice_la_SOURCES =                                               \
         $(libaccountsservice_la_sources)                                      \
+        act-user-manager-private.h                                                    \
         act-user-private.h                                                    \
+        act-group-private.h                                                   \
         $(BUILT_SOURCES)                                                      \
         $(END_OF_LIST)
 

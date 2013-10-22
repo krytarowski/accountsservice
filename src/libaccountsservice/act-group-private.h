@@ -1,7 +1,6 @@
 /* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 8 -*-
  *
  * Copyright (C) 2004-2005 James M. Cape <jcape@ignore-your.tv>.
- * Copyright (C) 2007-2008 William Jon McCann <mccann@jhu.edu>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,12 +17,27 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef __ACT_H__
-#define __ACT_H__
+/*
+ * Private interfaces to the ActGroup object
+ */
 
-#include <act/act-user-enum-types.h>
-#include <act/act-user.h>
-#include <act/act-group.h>
-#include <act/act-user-manager.h>
+#ifndef __ACT_GROUP_PRIVATE_H_
+#define __ACT_GROUP_PRIVATE_H_
 
-#endif /* __ACT_H__ */
+#include <pwd.h>
+
+#include "act-user-manager.h"
+#include "act-group.h"
+
+G_BEGIN_DECLS
+
+void           _act_group_update_from_object_path  (ActUserManager *manager,
+                                                    ActGroup       *group,
+                                                    const char     *object_path);
+void           _act_group_update_as_nonexistent    (ActGroup    *group);
+void           _act_group_load_from_group          (ActGroup    *group,
+                                                    ActGroup    *group_to_copy);
+
+G_END_DECLS
+
+#endif /* !__ACT_GROUP_PRIVATE_H_ */

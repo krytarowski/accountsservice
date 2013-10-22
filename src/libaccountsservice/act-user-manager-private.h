@@ -1,7 +1,6 @@
 /* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 8 -*-
  *
- * Copyright (C) 2004-2005 James M. Cape <jcape@ignore-your.tv>.
- * Copyright (C) 2007-2008 William Jon McCann <mccann@jhu.edu>
+ * Copyright (C) 2013 Red Hat
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,12 +17,24 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef __ACT_H__
-#define __ACT_H__
+/*
+ * Private interfaces to the ActUserManager object
+ */
 
-#include <act/act-user-enum-types.h>
-#include <act/act-user.h>
-#include <act/act-group.h>
-#include <act/act-user-manager.h>
+#ifndef __ACT_USER_MANAGER_PRIVATE_H_
+#define __ACT_USER_MANAGER_PRIVATE_H_
 
-#endif /* __ACT_H__ */
+#include <pwd.h>
+
+#include "act-user-manager.h"
+
+G_BEGIN_DECLS
+
+ActUser  *_act_user_manager_get_user   (ActUserManager *manager,
+                                        const char     *object_path);
+ActGroup *_act_user_manager_get_group  (ActUserManager *manager,
+                                        const char     *group_path);
+
+G_END_DECLS
+
+#endif /* !__ACT_GROUP_PRIVATE_H_ */

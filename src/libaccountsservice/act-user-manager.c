@@ -49,7 +49,9 @@
 #endif
 
 #include "act-user-manager.h"
+#include "act-user-manager-private.h"
 #include "act-user-private.h"
+#include "act-group-private.h"
 #include "accounts-generated.h"
 #include "ck-manager-generated.h"
 #include "ck-seat-generated.h"
@@ -86,6 +88,8 @@
  * @ACT_USER_MANAGER_ERROR_USER_DOES_NOT_EXIST: The user does not exist
  * @ACT_USER_MANAGER_ERROR_PERMISSION_DENIED: Permission denied
  * @ACT_USER_MANAGER_ERROR_NOT_SUPPORTED: Operation not supported
+ * @ACT_USER_MANAGER_ERROR_GROUP_EXISTS: The group already exists
+ * @ACT_USER_MANAGER_ERROR_GROUP_DOES_NOT_EXIST: The group does not exist
  *
  * Various error codes returned by the accounts service.
  */
@@ -158,6 +162,8 @@ typedef enum {
 typedef enum {
         ACT_USER_MANAGER_FETCH_USER_FROM_USERNAME_REQUEST,
         ACT_USER_MANAGER_FETCH_USER_FROM_ID_REQUEST,
+        ACT_USER_MANAGER_FETCH_GROUP_FROM_GROUPNAME_REQUEST,
+        ACT_USER_MANAGER_FETCH_GROUP_FROM_ID_REQUEST,
 } ActUserManagerFetchUserRequestType;
 
 typedef struct
@@ -165,10 +171,13 @@ typedef struct
         ActUserManager             *manager;
         ActUserManagerGetUserState  state;
         ActUser                    *user;
+        ActGroup                   *group;
         ActUserManagerFetchUserRequestType type;
         union {
                 char               *username;
                 uid_t               uid;
+                char               *groupname;
+                gid_t               gid;
         };
         char                       *object_path;
         char                       *description;
@@ -179,6 +188,8 @@ struct ActUserManagerPrivate
         GHashTable            *normal_users_by_name;
         GHashTable            *system_users_by_name;
         GHashTable            *users_by_object_path;
+        GHashTable            *groups_by_name;
+        GHashTable            *groups_by_object_path;
         GHashTable            *sessions;
         GDBusConnection       *connection;
         AccountsAccounts      *accounts_proxy;
@@ -190,6 +201,8 @@ struct ActUserManagerPrivate
         GSList                *new_users;
         GSList                *new_users_inhibiting_load;
         GSList                *fetch_user_requests;
+        GSList                *new_groups;
+        GSList                *new_groups_inhibiting_load;
 
         GSList                *exclude_usernames;
         GSList                *include_usernames;
@@ -200,6 +213,7 @@ struct ActUserManagerPrivate
         gboolean               has_multiple_users;
         gboolean               getting_sessions;
         gboolean               listing_cached_users;
+        gboolean               listing_cached_groups;
 };
 
 enum {
@@ -215,6 +229,9 @@ enum {
         USER_REMOVED,
         USER_IS_LOGGED_IN_CHANGED,
         USER_CHANGED,
+        GROUP_ADDED,
+        GROUP_REMOVED,
+        GROUP_CHANGED,
         LAST_SIGNAL
 };
 
@@ -227,6 +244,7 @@ static void     act_user_manager_finalize   (GObject             *object);
 static gboolean load_seat_incrementally     (ActUserManager *manager);
 static void     unload_seat                 (ActUserManager *manager);
 static void     load_users                  (ActUserManager *manager);
+static void     load_groups                 (ActUserManager *manager);
 static void     act_user_manager_queue_load (ActUserManager *manager);
 static void     queue_load_seat_and_users   (ActUserManager *manager);
 
@@ -236,6 +254,9 @@ static void     set_is_loaded (ActUserManager *manager, gboolean is_loaded);
 static void     on_new_user_loaded (ActUser        *user,
                                     GParamSpec     *pspec,
                                     ActUserManager *manager);
+static void     on_new_group_loaded (ActGroup       *group,
+                                     GParamSpec     *pspec,
+                                     ActUserManager *manager);
 static void     give_up (ActUserManager                 *manager,
                          ActUserManagerFetchUserRequest *request);
 static void     fetch_user_incrementally       (ActUserManagerFetchUserRequest *request);
@@ -243,6 +264,8 @@ static void     fetch_user_incrementally       (ActUserManagerFetchUserRequest *
 static void     maybe_set_is_loaded            (ActUserManager *manager);
 static void     update_user                    (ActUserManager *manager,
                                                 ActUser        *user);
+static void     update_group                   (ActUserManager *manager,
+                                                ActGroup       *group);
 static gpointer user_manager_object = NULL;
 
 G_DEFINE_TYPE (ActUserManager, act_user_manager, G_TYPE_OBJECT)
@@ -252,7 +275,9 @@ static const GDBusErrorEntry error_entries[] = {
         { ACT_USER_MANAGER_ERROR_USER_EXISTS,         "org.freedesktop.Accounts.Error.UserExists" },
         { ACT_USER_MANAGER_ERROR_USER_DOES_NOT_EXIST, "org.freedesktop.Accounts.Error.UserDoesNotExist" },
         { ACT_USER_MANAGER_ERROR_PERMISSION_DENIED,   "org.freedesktop.Accounts.Error.PermissionDenied" },
-        { ACT_USER_MANAGER_ERROR_NOT_SUPPORTED,       "org.freedesktop.Accounts.Error.NotSupported" }
+        { ACT_USER_MANAGER_ERROR_NOT_SUPPORTED,       "org.freedesktop.Accounts.Error.NotSupported" },
+        { ACT_USER_MANAGER_ERROR_GROUP_EXISTS,         "org.freedesktop.Accounts.Error.GroupExists" },
+        { ACT_USER_MANAGER_ERROR_GROUP_DOES_NOT_EXIST, "org.freedesktop.Accounts.Error.GroupDoesNotExist" }
 };
 
 GQuark
@@ -638,6 +663,12 @@ describe_user (ActUser *user)
 {
         ActUserManagerFetchUserRequest *request;
 
+        request = g_object_get_data (G_OBJECT (user), "fetch-user-request");
+
+        if (request != NULL) {
+                return request->description;
+        }
+
         if (act_user_is_loaded (user)) {
                 static char *description = NULL;
                 g_clear_pointer (&description, (GDestroyNotify) g_free);
@@ -646,7 +677,23 @@ describe_user (ActUser *user)
                 return description;
         }
 
-        request = g_object_get_data (G_OBJECT (user), "fetch-user-request");
+        return "user";
+}
+
+static const char *
+describe_group (ActGroup *group)
+{
+        ActUserManagerFetchUserRequest *request;
+
+        if (act_group_is_loaded (group)) {
+                static char *description = NULL;
+                g_clear_pointer (&description, (GDestroyNotify) g_free);
+
+                description = g_strdup_printf ("group %s", act_group_get_group_name (group));
+                return description;
+        }
+
+        request = g_object_get_data (G_OBJECT (group), "fetch-user-request");
 
         if (request != NULL) {
                 return request->description;
@@ -690,6 +737,20 @@ on_user_changed (ActUser        *user,
                 g_signal_emit (manager, signals[USER_CHANGED], 0, user);
 
                 update_user (manager, user);
+        }
+}
+
+static void
+on_group_changed (ActGroup       *group,
+                  ActUserManager *manager)
+{
+        if (manager->priv->is_loaded) {
+                g_debug ("ActUserManager: %s changed",
+                         describe_group (group));
+
+                g_signal_emit (manager, signals[GROUP_CHANGED], 0, group);
+
+                update_group (manager, group);
         }
 }
 
@@ -846,12 +907,24 @@ create_new_user (ActUserManager *manager)
         return g_object_ref (user);
 }
 
+static ActGroup *
+create_new_group (ActUserManager *manager)
+{
+        ActGroup *group;
+
+        group = g_object_new (ACT_TYPE_GROUP, NULL);
+
+        manager->priv->new_groups = g_slist_prepend (manager->priv->new_groups, group);
+
+        g_signal_connect_object (group, "notify::is-loaded", G_CALLBACK (on_new_group_loaded), manager, 0);
+
+        return g_object_ref (group);
+}
+
 static void
 add_user (ActUserManager *manager,
           ActUser        *user)
 {
-        const char *object_path;
-
         g_debug ("ActUserManager: tracking user '%s'", act_user_get_user_name (user));
         if (act_user_is_system_account (user)) {
                 g_hash_table_insert (manager->priv->system_users_by_name,
@@ -860,13 +933,6 @@ add_user (ActUserManager *manager,
         } else {
                 g_hash_table_insert (manager->priv->normal_users_by_name,
                                      g_strdup (act_user_get_user_name (user)),
-                                     g_object_ref (user));
-        }
-
-        object_path = act_user_get_object_path (user);
-        if (object_path != NULL) {
-                g_hash_table_insert (manager->priv->users_by_object_path,
-                                     (gpointer) object_path,
                                      g_object_ref (user));
         }
 
@@ -888,6 +954,29 @@ add_user (ActUserManager *manager,
                 g_signal_emit (manager, signals[USER_ADDED], 0, user);
         } else {
                 g_debug ("ActUserManager: not yet loaded, so not emitting user-added signal");
+        }
+}
+
+static void
+add_group (ActUserManager *manager,
+           ActGroup       *group)
+{
+        g_debug ("ActUserManager: tracking group '%s'", act_group_get_group_name (group));
+
+        g_hash_table_insert (manager->priv->groups_by_name,
+                             g_strdup (act_group_get_group_name (group)),
+                             g_object_ref (group));
+
+        g_signal_connect_object (group,
+                                 "changed",
+                                 G_CALLBACK (on_group_changed),
+                                 manager, 0);
+
+        if (manager->priv->is_loaded) {
+                g_debug ("ActUserManager: loaded, so emitting group-added signal");
+                g_signal_emit (manager, signals[GROUP_ADDED], 0, group);
+        } else {
+                g_debug ("ActUserManager: not yet loaded, so not emitting group-added signal");
         }
 }
 
@@ -927,6 +1016,34 @@ remove_user (ActUserManager *manager,
 }
 
 static void
+remove_group (ActUserManager *manager,
+              ActGroup       *group)
+{
+        g_debug ("ActUserManager: no longer tracking group '%s' (with object path %s)",
+                 act_group_get_group_name (group),
+                 act_group_get_object_path (group));
+
+        g_object_ref (group);
+
+        g_signal_handlers_disconnect_by_func (group, on_group_changed, manager);
+        if (act_group_get_object_path (group) != NULL) {
+                g_hash_table_remove (manager->priv->groups_by_object_path, act_group_get_object_path (group));
+        }
+        if (act_group_get_group_name (group) != NULL) {
+                g_hash_table_remove (manager->priv->groups_by_name, act_group_get_group_name (group));
+        }
+
+        if (manager->priv->is_loaded) {
+                g_debug ("ActUserManager: loaded, so emitting group-removed signal");
+                g_signal_emit (manager, signals[GROUP_REMOVED], 0, group);
+        } else {
+                g_debug ("ActUserManager: not yet loaded, so not emitting group-removed signal");
+        }
+
+        g_object_unref (group);
+}
+
+static void
 update_user (ActUserManager *manager,
              ActUser        *user)
 {
@@ -960,6 +1077,13 @@ update_user (ActUserManager *manager,
         }
 }
 
+static void
+update_group (ActUserManager *manager,
+              ActGroup       *group)
+{
+        /* Nothing to do... */
+}
+
 static ActUser *
 lookup_user_by_name (ActUserManager *manager,
                      const char     *username)
@@ -973,6 +1097,13 @@ lookup_user_by_name (ActUserManager *manager,
         }
 
         return user;
+}
+
+static ActGroup *
+lookup_group_by_name (ActUserManager *manager,
+                      const char     *groupname)
+{
+        return g_hash_table_lookup (manager->priv->groups_by_name, groupname);
 }
 
 static void
@@ -1049,6 +1180,74 @@ out:
         }
 }
 
+static void
+on_new_group_loaded (ActGroup       *group,
+                     GParamSpec     *pspec,
+                     ActUserManager *manager)
+{
+        const char *groupname;
+        ActGroup *old_group;
+
+        if (!act_group_is_loaded (group)) {
+                g_debug ("ActUserManager: %s loaded function called when not loaded",
+                         describe_group (group));
+                return;
+        }
+        g_signal_handlers_disconnect_by_func (group, on_new_group_loaded, manager);
+
+        manager->priv->new_groups = g_slist_remove (manager->priv->new_groups,
+                                                   group);
+        manager->priv->new_groups_inhibiting_load = g_slist_remove (manager->priv->new_groups_inhibiting_load,
+                                                                   group);
+
+        groupname = act_group_get_group_name (group);
+
+        if (groupname == NULL) {
+                if (!act_group_is_nonexistent (group)) {
+                        const char *object_path;
+
+                        object_path = act_group_get_object_path (group);
+
+                        if (object_path != NULL) {
+                                g_warning ("ActUserManager: %s has no groupname "
+                                           "(object path: %s, gid: %d)",
+                                           describe_group (group),
+                                           object_path, (int) act_group_get_gid (group));
+                        } else {
+                                g_warning ("ActUserManager: %s has no groupname (gid: %d)",
+                                           describe_group (group),
+                                           (int) act_group_get_gid (group));
+                        }
+                }
+                g_object_unref (group);
+                goto out;
+        }
+
+        g_debug ("ActUserManager: %s is now loaded", describe_group (group));
+
+        old_group = lookup_group_by_name (manager, groupname);
+
+        /* If groupname hasn't been added, yet, add it now
+         */
+        if (old_group == NULL) {
+                g_debug ("ActUserManager: %s was not yet known, adding it",
+                         describe_group (group));
+                add_group (manager, group);
+        } else {
+                _act_group_load_from_group (old_group, group);
+        }
+
+        g_object_unref (group);
+
+out:
+        if (manager->priv->new_groups_inhibiting_load == NULL) {
+                g_debug ("ActUserManager: no pending groups, trying to set loaded property");
+                maybe_set_is_loaded (manager);
+        } else {
+                g_debug ("ActUserManager: not all groups loaded yet");
+        }
+}
+
 static ActUser *
 add_new_user_for_object_path (const char     *object_path,
                               ActUserManager *manager)
@@ -1066,9 +1265,37 @@ add_new_user_for_object_path (const char     *object_path,
         g_debug ("ActUserManager: tracking new user with object path %s", object_path);
 
         user = create_new_user (manager);
-        _act_user_update_from_object_path (user, object_path);
+        _act_user_update_from_object_path (manager, user, object_path);
+        g_hash_table_insert (manager->priv->users_by_object_path,
+                             (gchar *)act_user_get_object_path (user),
+                             g_object_ref (user));
 
         return user;
+}
+
+static ActGroup *
+add_new_group_for_object_path (const char     *object_path,
+                               ActUserManager *manager)
+{
+        ActGroup *group;
+
+        group = g_hash_table_lookup (manager->priv->groups_by_object_path, object_path);
+
+        if (group != NULL) {
+                g_debug ("ActUserManager: tracking existing %s with object path %s",
+                         describe_group (group), object_path);
+                return group;
+        }
+
+        g_debug ("ActUserManager: tracking new group with object path %s", object_path);
+
+        group = create_new_group (manager);
+        _act_group_update_from_object_path (manager, group, object_path);
+        g_hash_table_insert (manager->priv->groups_by_object_path,
+                             (gchar *)act_group_get_object_path (group),
+                             g_object_ref (group));
+
+        return group;
 }
 
 static void
@@ -1085,6 +1312,22 @@ on_new_user_in_accounts_service (GDBusProxy *proxy,
 
         g_debug ("ActUserManager: new user in accounts service with object path %s", object_path);
         add_new_user_for_object_path (object_path, manager);
+}
+
+static void
+on_new_group_in_accounts_service (GDBusProxy *proxy,
+                                  const char *object_path,
+                                  gpointer    user_data)
+{
+        ActUserManager *manager = ACT_USER_MANAGER (user_data);
+
+        if (!manager->priv->is_loaded) {
+                g_debug ("ActUserManager: ignoring new group in accounts service with object path %s since not loaded yet", object_path);
+                return;
+        }
+
+        g_debug ("ActUserManager: new group in accounts service with object path %s", object_path);
+        add_new_group_for_object_path (object_path, manager);
 }
 
 static void
@@ -1107,6 +1350,28 @@ on_user_removed_in_accounts_service (GDBusProxy *proxy,
         manager->priv->new_users = g_slist_remove (manager->priv->new_users, user);
 
         remove_user (manager, user);
+}
+
+static void
+on_group_removed_in_accounts_service (GDBusProxy *proxy,
+                                      const char *object_path,
+                                      gpointer    user_data)
+{
+        ActUserManager *manager = ACT_USER_MANAGER (user_data);
+        ActGroup       *group;
+
+        group = g_hash_table_lookup (manager->priv->groups_by_object_path, object_path);
+
+        if (group == NULL) {
+                g_debug ("ActUserManager: ignoring untracked group %s", object_path);
+                return;
+        } else {
+                g_debug ("ActUserManager: tracked group %s removed from accounts service", object_path);
+        }
+
+        manager->priv->new_groups = g_slist_remove (manager->priv->new_groups, group);
+
+        remove_group (manager, group);
 }
 
 static void
@@ -1398,6 +1663,37 @@ on_find_user_by_name_finished (GObject       *object,
 }
 
 static void
+on_find_group_by_name_finished (GObject       *object,
+                                GAsyncResult  *result,
+                                gpointer       data)
+{
+        AccountsAccounts *proxy = ACCOUNTS_ACCOUNTS (object);
+        ActUserManagerFetchUserRequest *request = data;
+        GError          *error = NULL;
+        char            *group;
+
+        if (!accounts_accounts_call_find_group_by_name_finish (proxy, &group, result, &error)) {
+                if (error != NULL) {
+                        g_debug ("ActUserManager: Failed to find %s: %s",
+                                 request->description, error->message);
+                        g_error_free (error);
+                } else {
+                        g_debug ("ActUserManager: Failed to find %s",
+                                 request->description);
+                }
+                give_up (request->manager, request);
+                return;
+        }
+
+        g_debug ("ActUserManager: Found object path of %s: %s",
+                 request->description, group);
+        request->object_path = group;
+        request->state++;
+
+        fetch_user_incrementally (request);
+}
+
+static void
 on_find_user_by_id_finished (GObject       *object,
                              GAsyncResult  *result,
                              gpointer       data)
@@ -1429,6 +1725,37 @@ on_find_user_by_id_finished (GObject       *object,
 }
 
 static void
+on_find_group_by_id_finished (GObject       *object,
+                              GAsyncResult  *result,
+                              gpointer       data)
+{
+        AccountsAccounts *proxy = ACCOUNTS_ACCOUNTS (object);
+        ActUserManagerFetchUserRequest *request = data;
+        GError          *error = NULL;
+        char            *group;
+
+        if (!accounts_accounts_call_find_group_by_id_finish (proxy, &group, result, &error)) {
+                if (error != NULL) {
+                        g_debug ("ActUserManager: Failed to find user %lu: %s",
+                                 (gulong) request->uid, error->message);
+                        g_error_free (error);
+                } else {
+                        g_debug ("ActUserManager: Failed to find user with id %lu",
+                                 (gulong) request->uid);
+                }
+                give_up (request->manager, request);
+                return;
+        }
+
+        g_debug ("ActUserManager: Found object path of %s: %s",
+                 request->description, group);
+        request->object_path = group;
+        request->state++;
+
+        fetch_user_incrementally (request);
+}
+
+static void
 find_user_in_accounts_service (ActUserManager                 *manager,
                                ActUserManagerFetchUserRequest *request)
 {
@@ -1452,7 +1779,20 @@ find_user_in_accounts_service (ActUserManager                 *manager,
                                                             on_find_user_by_id_finished,
                                                             request);
                     break;
-
+                case ACT_USER_MANAGER_FETCH_GROUP_FROM_GROUPNAME_REQUEST:
+                    accounts_accounts_call_find_group_by_name (manager->priv->accounts_proxy,
+                                                               request->groupname,
+                                                               NULL,
+                                                               on_find_group_by_name_finished,
+                                                               request);
+                    break;
+                case ACT_USER_MANAGER_FETCH_GROUP_FROM_ID_REQUEST:
+                    accounts_accounts_call_find_group_by_id (manager->priv->accounts_proxy,
+                                                             request->gid,
+                                                             NULL,
+                                                             on_find_group_by_id_finished,
+                                                             request);
+                    break;
         }
 }
 
@@ -1530,6 +1870,50 @@ on_list_cached_users_finished (GObject      *object,
                         }
                 }
         }
+
+        g_object_unref (manager);
+}
+
+static void
+on_list_cached_groups_finished (GObject      *object,
+                                GAsyncResult *result,
+                                gpointer      data)
+{
+        AccountsAccounts *proxy = ACCOUNTS_ACCOUNTS (object);
+        ActUserManager   *manager = data;
+        gchar           **group_paths;
+        GError           *error = NULL;
+
+        manager->priv->listing_cached_groups = FALSE;
+        if (!accounts_accounts_call_list_cached_groups_finish (proxy, &group_paths, result, &error)) {
+                g_debug ("ActUserManager: ListCachedGroups failed: %s", error->message);
+                g_error_free (error);
+
+                g_object_unref (manager->priv->accounts_proxy);
+                manager->priv->accounts_proxy = NULL;
+
+                g_object_unref (manager);
+                return;
+        }
+
+        if (g_strv_length (group_paths) > 0) {
+                int i;
+
+                g_debug ("ActUserManager: ListCachedGroups finished, will set loaded property after list is fully loaded");
+                for (i = 0; group_paths[i] != NULL; i++) {
+                        ActGroup *group;
+
+                        group = add_new_group_for_object_path (group_paths[i], manager);
+                        if (!manager->priv->is_loaded) {
+                                manager->priv->new_groups_inhibiting_load = g_slist_prepend (manager->priv->new_groups_inhibiting_load, group);
+                        }
+                }
+        } else {
+                g_debug ("ActUserManager: ListCachedGroups finished with empty list, maybe setting loaded property now");
+                maybe_set_is_loaded (manager);
+        }
+
+        g_strfreev (group_paths);
 
         g_object_unref (manager);
 }
@@ -2150,11 +2534,17 @@ free_fetch_user_request (ActUserManagerFetchUserRequest *request)
 
         manager = request->manager;
 
-        g_object_set_data (G_OBJECT (request->user), "fetch-user-request", NULL);
+        if (request->user)
+                g_object_set_data (G_OBJECT (request->user), "fetch-user-request", NULL);
+        if (request->group)
+                g_object_set_data (G_OBJECT (request->group), "fetch-user-request", NULL);
 
         manager->priv->fetch_user_requests = g_slist_remove (manager->priv->fetch_user_requests, request);
         if (request->type == ACT_USER_MANAGER_FETCH_USER_FROM_USERNAME_REQUEST) {
                 g_free (request->username);
+        }
+        if (request->type == ACT_USER_MANAGER_FETCH_GROUP_FROM_GROUPNAME_REQUEST) {
+                g_free (request->groupname);
         }
 
         g_free (request->object_path);
@@ -2175,6 +2565,8 @@ give_up (ActUserManager                 *manager,
 
         if (request->user)
                 _act_user_update_as_nonexistent (request->user);
+        if (request->group)
+                _act_group_update_as_nonexistent (request->group);
 }
 
 static void
@@ -2226,7 +2618,10 @@ fetch_user_incrementally (ActUserManagerFetchUserRequest *request)
                 break;
         case ACT_USER_MANAGER_GET_USER_STATE_FETCHED:
                 g_debug ("ActUserManager: %s fetched", request->description);
-                _act_user_update_from_object_path (request->user, request->object_path);
+                if (request->user)
+                        _act_user_update_from_object_path (request->manager, request->user, request->object_path);
+                if (request->group)
+                        _act_group_update_from_object_path (request->manager, request->group, request->object_path);
                 break;
         case ACT_USER_MANAGER_GET_USER_STATE_UNFETCHED:
                 g_debug ("ActUserManager: %s was not fetched", request->description);
@@ -2266,6 +2661,28 @@ fetch_user_with_username_from_accounts_service (ActUserManager *manager,
 }
 
 static void
+fetch_group_with_groupname_from_accounts_service (ActUserManager *manager,
+                                                  ActGroup       *group,
+                                                  const char     *groupname)
+{
+        ActUserManagerFetchUserRequest *request;
+
+        request = g_slice_new0 (ActUserManagerFetchUserRequest);
+
+        request->manager = g_object_ref (manager);
+        request->type = ACT_USER_MANAGER_FETCH_GROUP_FROM_GROUPNAME_REQUEST;
+        request->groupname = g_strdup (groupname);
+        request->group = group;
+        request->state = ACT_USER_MANAGER_GET_USER_STATE_UNFETCHED + 1;
+        request->description = g_strdup_printf ("group '%s'", request->groupname);
+
+        manager->priv->fetch_user_requests = g_slist_prepend (manager->priv->fetch_user_requests,
+                                                              request);
+        g_object_set_data (G_OBJECT (group), "fetch-user-request", request);
+        fetch_user_incrementally (request);
+}
+
+static void
 fetch_user_with_id_from_accounts_service (ActUserManager *manager,
                                           ActUser        *user,
                                           uid_t           id)
@@ -2284,6 +2701,28 @@ fetch_user_with_id_from_accounts_service (ActUserManager *manager,
         manager->priv->fetch_user_requests = g_slist_prepend (manager->priv->fetch_user_requests,
                                                               request);
         g_object_set_data (G_OBJECT (user), "fetch-user-request", request);
+        fetch_user_incrementally (request);
+}
+
+static void
+fetch_group_with_id_from_accounts_service (ActUserManager *manager,
+                                           ActGroup       *group,
+                                           gid_t           id)
+{
+        ActUserManagerFetchUserRequest *request;
+
+        request = g_slice_new0 (ActUserManagerFetchUserRequest);
+
+        request->manager = g_object_ref (manager);
+        request->type = ACT_USER_MANAGER_FETCH_GROUP_FROM_ID_REQUEST;
+        request->gid = id;
+        request->group = group;
+        request->state = ACT_USER_MANAGER_GET_USER_STATE_UNFETCHED + 1;
+        request->description = g_strdup_printf ("group with id %lu", (gulong) request->gid);
+
+        manager->priv->fetch_user_requests = g_slist_prepend (manager->priv->fetch_user_requests,
+                                                              request);
+        g_object_set_data (G_OBJECT (group), "fetch-user-request", request);
         fetch_user_incrementally (request);
 }
 
@@ -2324,6 +2763,42 @@ act_user_manager_get_user (ActUserManager *manager,
 }
 
 /**
+ * act_user_manager_get_group:
+ * @manager: the manager to query.
+ * @groupname: the login name of the group to get.
+ *
+ * Retrieves a pointer to the #ActGroup object for the login @groupname
+ * from @manager. Trying to use this object before its
+ * #ActGroup:is-loaded property is %TRUE will result in undefined
+ * behavior.
+ *
+ * Returns: (transfer none): #ActGroup object
+ **/
+ActGroup *
+act_user_manager_get_group (ActUserManager *manager,
+                            const char     *groupname)
+{
+        ActGroup *group;
+
+        g_return_val_if_fail (ACT_IS_USER_MANAGER (manager), NULL);
+        g_return_val_if_fail (groupname != NULL && groupname[0] != '\0', NULL);
+
+        group = lookup_group_by_name (manager, groupname);
+
+        /* if we don't have it loaded try to load it now */
+        if (group == NULL) {
+                g_debug ("ActUserManager: trying to track new group with groupname %s", groupname);
+                group = create_new_group (manager);
+
+                if (manager->priv->accounts_proxy != NULL) {
+                        fetch_group_with_groupname_from_accounts_service (manager, group, groupname);
+                }
+        }
+
+        return group;
+}
+
+/**
  * act_user_manager_get_user_by_id:
  * @manager: the manager to query.
  * @id: the uid of the user to get.
@@ -2360,6 +2835,45 @@ act_user_manager_get_user_by_id (ActUserManager *manager,
         }
 
         return user;
+}
+
+/**
+ * act_user_manager_get_group_by_id:
+ * @manager: the manager to query.
+ * @id: the uid of the group to get.
+ *
+ * Retrieves a pointer to the #ActGroup object for the group with the
+ * given uid from @manager. Trying to use this object before its
+ * #ActGroup:is-loaded property is %TRUE will result in undefined
+ * behavior.
+ *
+ * Returns: (transfer none): #ActGroup object
+ */
+ActGroup *
+act_user_manager_get_group_by_id (ActUserManager *manager,
+                                  gid_t           id)
+{
+        ActGroup *group;
+        gchar  *object_path;
+
+        g_return_val_if_fail (ACT_IS_USER_MANAGER (manager), NULL);
+
+        object_path = g_strdup_printf ("/org/freedesktop/Accounts/Group%lu", (gulong) id);
+        group = g_hash_table_lookup (manager->priv->groups_by_object_path, object_path);
+        g_free (object_path);
+
+        if (group != NULL) {
+                return g_object_ref (group);
+        } else {
+                g_debug ("ActUserManager: trying to track new group with uid %lu", (gulong) id);
+                group = create_new_group (manager);
+
+                if (manager->priv->accounts_proxy != NULL) {
+                        fetch_group_with_id_from_accounts_service (manager, group, id);
+                }
+        }
+
+        return group;
 }
 
 static void
@@ -2413,6 +2927,16 @@ maybe_set_is_loaded (ActUserManager *manager)
 
         if (manager->priv->new_users_inhibiting_load != NULL) {
                 g_debug ("ActUserManager: Loading new users, so not setting loaded property");
+                return;
+        }
+
+        if (manager->priv->listing_cached_groups) {
+                g_debug ("ActUserManager: Listing cached groups, so not setting loaded property");
+                return;
+        }
+
+        if (manager->priv->new_groups_inhibiting_load != NULL) {
+                g_debug ("ActUserManager: Loading new groups, so not setting loaded property");
                 return;
         }
 
@@ -2526,6 +3050,19 @@ load_users (ActUserManager *manager)
         manager->priv->listing_cached_users = TRUE;
 }
 
+static void
+load_groups (ActUserManager *manager)
+{
+        g_assert (manager->priv->accounts_proxy != NULL);
+        g_debug ("ActUserManager: calling 'ListCachedGroups'");
+
+        accounts_accounts_call_list_cached_groups (manager->priv->accounts_proxy,
+                                                   NULL,
+                                                   on_list_cached_groups_finished,
+                                                   g_object_ref (manager));
+        manager->priv->listing_cached_groups = TRUE;
+}
+
 static gboolean
 load_seat_incrementally (ActUserManager *manager)
 {
@@ -2565,9 +3102,10 @@ load_idle (ActUserManager *manager)
 {
         /* The order below is important: load_seat_incrementally might
            set "is-loaded" immediately and we thus need to call
-           load_users before it.
+           load_users and load_groups before it.
         */
         load_users (manager);
+        load_groups (manager);
         manager->priv->seat.state = ACT_USER_MANAGER_SEAT_STATE_UNLOADED + 1;
         load_seat_incrementally (manager);
         manager->priv->load_id = 0;
@@ -2749,6 +3287,46 @@ act_user_manager_class_init (ActUserManagerClass *klass)
                               g_cclosure_marshal_VOID__OBJECT,
                               G_TYPE_NONE, 1, ACT_TYPE_USER);
 
+        /**
+         * ActUserManager::group-added:
+         *
+         * Emitted when a group is added to the user manager.
+         */
+        signals [GROUP_ADDED] =
+                g_signal_new ("group-added",
+                              G_TYPE_FROM_CLASS (klass),
+                              G_SIGNAL_RUN_LAST,
+                              G_STRUCT_OFFSET (ActUserManagerClass, group_added),
+                              NULL, NULL,
+                              g_cclosure_marshal_VOID__OBJECT,
+                              G_TYPE_NONE, 1, ACT_TYPE_GROUP);
+        /**
+         * ActUserManager::group-removed:
+         *
+         * Emitted when a group is removed from the user manager.
+         */
+        signals [GROUP_REMOVED] =
+                g_signal_new ("group-removed",
+                              G_TYPE_FROM_CLASS (klass),
+                              G_SIGNAL_RUN_LAST,
+                              G_STRUCT_OFFSET (ActUserManagerClass, group_removed),
+                              NULL, NULL,
+                              g_cclosure_marshal_VOID__OBJECT,
+                              G_TYPE_NONE, 1, ACT_TYPE_GROUP);
+        /**
+         * ActUserManager::group-changed:
+         *
+         * One of the groups has changed
+         */
+        signals [GROUP_CHANGED] =
+                g_signal_new ("group-changed",
+                              G_TYPE_FROM_CLASS (klass),
+                              G_SIGNAL_RUN_LAST,
+                              G_STRUCT_OFFSET (ActUserManagerClass, group_changed),
+                              NULL, NULL,
+                              g_cclosure_marshal_VOID__OBJECT,
+                              G_TYPE_NONE, 1, ACT_TYPE_GROUP);
+
         g_type_class_add_private (klass, sizeof (ActUserManagerPrivate));
 }
 
@@ -2798,6 +3376,14 @@ act_user_manager_init (ActUserManager *manager)
                                                                      g_str_equal,
                                                                      NULL,
                                                                      g_object_unref);
+        manager->priv->groups_by_name = g_hash_table_new_full (g_str_hash,
+                                                               g_str_equal,
+                                                               g_free,
+                                                               g_object_unref);
+        manager->priv->groups_by_object_path = g_hash_table_new_full (g_str_hash,
+                                                                      g_str_equal,
+                                                                      NULL,
+                                                                      g_object_unref);
 
         error = NULL;
         manager->priv->connection = g_bus_get_sync (G_BUS_TYPE_SYSTEM, NULL, &error);
@@ -2835,6 +3421,15 @@ act_user_manager_init (ActUserManager *manager)
         g_signal_connect (manager->priv->accounts_proxy,
                           "user-deleted",
                           G_CALLBACK (on_user_removed_in_accounts_service),
+                          manager);
+
+        g_signal_connect (manager->priv->accounts_proxy,
+                          "group-added",
+                          G_CALLBACK (on_new_group_in_accounts_service),
+                          manager);
+        g_signal_connect (manager->priv->accounts_proxy,
+                          "group-deleted",
+                          G_CALLBACK (on_group_removed_in_accounts_service),
                           manager);
 
         manager->priv->seat.state = ACT_USER_MANAGER_SEAT_STATE_UNLOADED;
@@ -2929,6 +3524,8 @@ act_user_manager_finalize (GObject *object)
         g_hash_table_destroy (manager->priv->normal_users_by_name);
         g_hash_table_destroy (manager->priv->system_users_by_name);
         g_hash_table_destroy (manager->priv->users_by_object_path);
+        g_hash_table_destroy (manager->priv->groups_by_name);
+        g_hash_table_destroy (manager->priv->groups_by_object_path);
 
         G_OBJECT_CLASS (act_user_manager_parent_class)->finalize (object);
 }
@@ -3419,4 +4016,269 @@ act_user_manager_delete_user_finish (ActUserManager  *manager,
         }
 
         return success;
+}
+
+/**
+ * act_user_manager_create_group:
+ * @manager: a #ActUserManager
+ * @groupname: a unix group name
+ * @error: a #GError
+ *
+ * Creates a group on the system.
+ *
+ * Returns: (transfer full): group object
+ */
+ActGroup *
+act_user_manager_create_group (ActUserManager      *manager,
+                               const char          *groupname,
+                               GError             **error)
+{
+        GError *local_error = NULL;
+        gboolean res;
+        gchar *path;
+        ActGroup *group;
+
+        g_debug ("ActUserManager: Creating group '%s'",
+                 groupname);
+
+        g_assert (manager->priv->accounts_proxy != NULL);
+
+        local_error = NULL;
+        res = accounts_accounts_call_create_group_sync (manager->priv->accounts_proxy,
+                                                        groupname,
+                                                        &path,
+                                                        NULL,
+                                                        &local_error);
+        if (! res) {
+                g_propagate_error (error, local_error);
+                return NULL;
+        }
+
+        group = add_new_group_for_object_path (path, manager);
+
+        g_free (path);
+
+        return group;
+}
+
+/**
+ * act_user_manager_create_group_async:
+ * @manager: a #ActUserManager
+ * @groupname: a unix group name
+ * @cancellable: (allow-none): optional #GCancellable object,
+ *     %NULL to ignore
+ * @callback: (scope async): a #GAsyncReadyCallback to call
+ *     when the request is satisfied
+ * @user_data: (closure): the data to pass to @callback
+ *
+ * Asynchronously creates a group on the system.
+ *
+ * For more details, see act_user_manager_create_group(), which
+ * is the synchronous version of this call.
+ */
+void
+act_user_manager_create_group_async (ActUserManager      *manager,
+                                     const char          *groupname,
+                                     GCancellable        *cancellable,
+                                     GAsyncReadyCallback  callback,
+                                     gpointer             user_data)
+{
+        GSimpleAsyncResult *res;
+
+        g_return_if_fail (ACT_IS_USER_MANAGER (manager));
+        g_return_if_fail (manager->priv->accounts_proxy != NULL);
+
+        g_debug ("ActUserManager: Creating group (async) '%s'",
+                 groupname);
+
+        g_assert (manager->priv->accounts_proxy != NULL);
+
+        res = g_simple_async_result_new (G_OBJECT (manager),
+                                         callback, user_data,
+                                         act_user_manager_create_group_async);
+        g_simple_async_result_set_check_cancellable (res, cancellable);
+
+        accounts_accounts_call_create_group (manager->priv->accounts_proxy,
+                                             groupname,
+                                             cancellable,
+                                             act_user_manager_async_complete_handler, res);
+}
+
+/**
+ * act_user_manager_create_group_finish:
+ * @manager: a #ActUserManager
+ * @result: a #GAsyncResult
+ * @error: a #GError
+ *
+ * Finishes an asynchronous user creation.
+ *
+ * See act_user_manager_create_user_async().
+ *
+ * Returns: (transfer full): group object
+ *
+ * Since: 0.6.27
+ */
+ActGroup *
+act_user_manager_create_group_finish (ActUserManager  *manager,
+                                      GAsyncResult    *result,
+                                      GError         **error)
+{
+        GAsyncResult *inner_result;
+        ActGroup *group = NULL;
+        gchar *path;
+        GSimpleAsyncResult *res;
+        GError *remote_error = NULL;
+
+        g_return_val_if_fail (g_simple_async_result_is_valid (result, G_OBJECT (manager), act_user_manager_create_group_async), FALSE);
+
+        res = G_SIMPLE_ASYNC_RESULT (result);
+        inner_result = g_simple_async_result_get_op_res_gpointer (res);
+        g_assert (inner_result);
+
+        if (accounts_accounts_call_create_group_finish (manager->priv->accounts_proxy,
+                                                        &path, inner_result, &remote_error)) {
+                group = add_new_group_for_object_path (path, manager);
+                g_free (path);
+        }
+
+        if (remote_error) {
+                g_dbus_error_strip_remote_error (remote_error);
+                g_propagate_error (error, remote_error);
+        }
+
+        return group;
+}
+
+/**
+ * act_user_manager_delete_group:
+ * @manager: a #ActUserManager
+ * @group: an #ActGroup object
+ * @error: a #GError
+ *
+ * Deletes a group account on the system.
+ *
+ * Returns: %TRUE if the group account was successfully deleted
+ */
+gboolean
+act_user_manager_delete_group (ActUserManager  *manager,
+                               ActGroup         *group,
+                               GError         **error)
+{
+        GError *local_error;
+        gboolean res = TRUE;
+
+        g_return_val_if_fail (ACT_IS_USER_MANAGER (manager), FALSE);
+        g_return_val_if_fail (ACT_IS_GROUP (group), FALSE);
+        g_return_val_if_fail (manager->priv->accounts_proxy != NULL, FALSE);
+
+        g_debug ("ActUserManager: Deleting group '%s' (gid %ld)",
+                 act_group_get_group_name (group), (long) act_group_get_gid (group));
+
+        local_error = NULL;
+        if (!accounts_accounts_call_delete_group_sync (manager->priv->accounts_proxy,
+                                                      act_group_get_gid (group),
+                                                      NULL,
+                                                      &local_error)) {
+                g_propagate_error (error, local_error);
+                res = FALSE;
+        }
+
+        return res;
+}
+
+/**
+ * act_user_manager_delete_group_async:
+ * @manager: a #ActUserManager
+ * @group: a #ActGroup object
+ * @cancellable: (allow-none): optional #GCancellable object,
+ *     %NULL to ignore
+ * @callback: (scope async): a #GAsyncReadyCallback to call
+ *     when the request is satisfied
+ * @user_data: (closure): the data to pass to @callback
+ *
+ * Asynchronously deletes a group account from the system.
+ *
+ * For more details, see act_user_manager_delete_group(), which
+ * is the synchronous version of this call.
+ *
+ * Since: 0.6.27
+ */
+void
+act_user_manager_delete_group_async (ActUserManager      *manager,
+                                     ActGroup             *group,
+                                     GCancellable        *cancellable,
+                                     GAsyncReadyCallback  callback,
+                                     gpointer             user_data)
+{
+        GSimpleAsyncResult *res;
+
+        g_return_if_fail (ACT_IS_USER_MANAGER (manager));
+        g_return_if_fail (ACT_IS_GROUP (group));
+        g_return_if_fail (manager->priv->accounts_proxy != NULL);
+
+        res = g_simple_async_result_new (G_OBJECT (manager),
+                                         callback, user_data,
+                                         act_user_manager_delete_group_async);
+        g_simple_async_result_set_check_cancellable (res, cancellable);
+
+        g_debug ("ActUserManager: Deleting (async) group '%s' (gid %ld)",
+                 act_group_get_group_name (group), (long) act_group_get_gid (group));
+
+        accounts_accounts_call_delete_group (manager->priv->accounts_proxy,
+                                            act_group_get_gid (group),
+                                            cancellable,
+                                            act_user_manager_async_complete_handler, res);
+}
+
+/**
+ * act_user_manager_delete_group_finish:
+ * @manager: a #ActUserManager
+ * @result: a #GAsyncResult
+ * @error: a #GError
+ *
+ * Finishes an asynchronous group account deletion.
+ *
+ * See act_user_manager_delete_group_async().
+ *
+ * Returns: %TRUE if the group account was successfully deleted
+ *
+ * Since: 0.6.27
+ */
+gboolean
+act_user_manager_delete_group_finish (ActUserManager  *manager,
+                                      GAsyncResult    *result,
+                                      GError         **error)
+{
+        GAsyncResult *inner_result;
+        gboolean success;
+        GSimpleAsyncResult *res;
+        GError *remote_error = NULL;
+
+        g_return_val_if_fail (g_simple_async_result_is_valid (result, G_OBJECT (manager), act_user_manager_delete_group_async), FALSE);
+        res = G_SIMPLE_ASYNC_RESULT (result);
+        inner_result = g_simple_async_result_get_op_res_gpointer (res);
+        g_assert (inner_result);
+
+        success = accounts_accounts_call_delete_group_finish (manager->priv->accounts_proxy,
+                                                              inner_result, &remote_error);
+        if (remote_error) {
+                g_dbus_error_strip_remote_error (remote_error);
+                g_propagate_error (error, remote_error);
+        }
+
+        return success;
+}
+
+ActUser *
+_act_user_manager_get_user (ActUserManager *manager,
+                            const gchar *object_path)
+{
+        return add_new_user_for_object_path (object_path, manager);
+}
+
+ActGroup *
+_act_user_manager_get_group (ActUserManager *manager,
+                             const gchar *object_path)
+{
+        return add_new_group_for_object_path (object_path, manager);
 }

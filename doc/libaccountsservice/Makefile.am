@@ -13,6 +13,7 @@ HFILE_GLOB=$(top_srcdir)/src/libaccountsservice/*.h
 IGNORE_HFILES= \
 	accounts-generated.h \
 	accounts-user-generated.h \
+	accounts-group-generated.h \
 	ck-manager-generated.h \
 	ck-seat-generated.h \
 	ck-session-generated.h \

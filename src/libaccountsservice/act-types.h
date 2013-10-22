@@ -1,7 +1,6 @@
 /* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 8 -*-
  *
- * Copyright (C) 2004-2005 James M. Cape <jcape@ignore-your.tv>.
- * Copyright (C) 2007-2008 William Jon McCann <mccann@jhu.edu>
+ * Copyright (C) 2013 Red Hat, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -18,12 +17,11 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef __ACT_H__
-#define __ACT_H__
+#ifndef __ACT_TYPES_H__
+#define __ACT_TYPES_H__
 
-#include <act/act-user-enum-types.h>
-#include <act/act-user.h>
-#include <act/act-group.h>
-#include <act/act-user-manager.h>
+typedef struct _ActUser        ActUser;
+typedef struct _ActGroup       ActGroup;
+typedef struct _ActUserManager ActUserManager;
 
-#endif /* __ACT_H__ */
+#endif /* __ACT_TYPES_H__ */
