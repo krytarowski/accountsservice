@@ -92,7 +92,7 @@ G_DEFINE_TYPE_WITH_CODE (Daemon, daemon, ACCOUNTS_TYPE_ACCOUNTS_SKELETON, G_IMPL
 #define DAEMON_GET_PRIVATE(o) (G_TYPE_INSTANCE_GET_PRIVATE ((o), TYPE_DAEMON, DaemonPrivate))
 
 static const GDBusErrorEntry accounts_error_entries[] =
-{ 
+{
         { ERROR_FAILED, "org.freedesktop.Accounts.Error.Failed" },
         { ERROR_USER_EXISTS, "org.freedesktop.Accounts.Error.UserExists" },
         { ERROR_USER_DOES_NOT_EXIST, "org.freedesktop.Accounts.Error.UserDoesNotExist" },
@@ -765,7 +765,7 @@ register_accounts_daemon (Daemon *daemon)
                         g_critical ("error exporting interface: %s", error->message);
                         g_error_free (error);
                 }
-                goto error;     
+                goto error;
         }
 
         return TRUE;
@@ -842,6 +842,11 @@ daemon_local_find_user_by_id (Daemon *daemon,
                 return NULL;
         }
 
+        if (!user_classify_is_human (uid, pwent->pw_name, pwent->pw_shell, NULL)) {
+                g_debug ("rejecting excluded user %d", (int)uid);
+                return NULL;
+        }
+
         user = g_hash_table_lookup (daemon->priv->users, pwent->pw_name);
 
         if (user == NULL)
@@ -860,6 +865,11 @@ daemon_local_find_user_by_name (Daemon      *daemon,
         pwent = getpwnam (name);
         if (pwent == NULL) {
                 g_debug ("unable to lookup name %s: %s", name, g_strerror (errno));
+                return NULL;
+        }
+
+        if (!user_classify_is_human (pwent->pw_uid, pwent->pw_name, pwent->pw_shell, NULL)) {
+                g_debug ("rejecting excluded user %s", name);
                 return NULL;
         }
 
@@ -952,22 +962,11 @@ finish_list_cached_users (gpointer user_data)
         GHashTableIter iter;
         const gchar *name;
         User *user;
-        uid_t uid;
-        const gchar *shell;
 
         object_paths = g_ptr_array_new ();
 
         g_hash_table_iter_init (&iter, data->daemon->priv->users);
         while (g_hash_table_iter_next (&iter, (gpointer *)&name, (gpointer *)&user)) {
-                uid = user_get_uid (user);
-                shell = user_get_shell (user);
-
-                if (!user_classify_is_human (uid, name, shell, NULL)) {
-                        g_debug ("user %s %ld excluded", name, (long) uid);
-                        continue;
-                }
-
-                g_debug ("user %s %ld not excluded", name, (long) uid);
                 g_ptr_array_add (object_paths, (gpointer) user_get_object_path (user));
         }
         g_ptr_array_add (object_paths, NULL);
