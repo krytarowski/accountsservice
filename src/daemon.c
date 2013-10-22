@@ -80,7 +80,6 @@ struct DaemonPrivate {
         guint autologin_id;
 
         PolkitAuthority *authority;
-        GHashTable *extension_ifaces;
 };
 
 typedef struct passwd * (* EntryGeneratorFunc) (GHashTable *, gpointer *);
@@ -683,8 +682,6 @@ daemon_init (Daemon *daemon)
 {
         daemon->priv = DAEMON_GET_PRIVATE (daemon);
 
-        daemon->priv->extension_ifaces = daemon_read_extension_ifaces ();
-
         daemon->priv->users = create_users_hash_table ();
 
         daemon->priv->passwd_monitor = setup_monitor (daemon,
@@ -727,8 +724,6 @@ daemon_finalize (GObject *object)
                 g_object_unref (daemon->priv->bus_connection);
 
         g_hash_table_destroy (daemon->priv->users);
-
-        g_hash_table_unref (daemon->priv->extension_ifaces);
 
         G_OBJECT_CLASS (daemon_parent_class)->finalize (object);
 }
@@ -1551,12 +1546,6 @@ daemon_local_set_automatic_login (Daemon    *daemon,
         }
 
         return TRUE;
-}
-
-GHashTable *
-daemon_get_extension_ifaces (Daemon *daemon)
-{
-  return daemon->priv->extension_ifaces;
 }
 
 static void
