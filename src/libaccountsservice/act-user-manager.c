@@ -998,19 +998,21 @@ on_new_user_loaded (ActUser        *user,
         username = act_user_get_user_name (user);
 
         if (username == NULL) {
-                const char *object_path;
+                if (!act_user_is_nonexistent (user)) {
+                        const char *object_path;
 
-                object_path = act_user_get_object_path (user);
+                        object_path = act_user_get_object_path (user);
 
-                if (object_path != NULL) {
-                        g_warning ("ActUserManager: %s has no username "
-                                   "(object path: %s, uid: %d)",
-                                   describe_user (user),
-                                   object_path, (int) act_user_get_uid (user));
-                } else {
-                        g_warning ("ActUserManager: %s has no username (uid: %d)",
-                                   describe_user (user),
-                                   (int) act_user_get_uid (user));
+                        if (object_path != NULL) {
+                                g_warning ("ActUserManager: %s has no username "
+                                           "(object path: %s, uid: %d)",
+                                           describe_user (user),
+                                           object_path, (int) act_user_get_uid (user));
+                        } else {
+                                g_warning ("ActUserManager: %s has no username (uid: %d)",
+                                           describe_user (user),
+                                           (int) act_user_get_uid (user));
+                        }
                 }
                 g_object_unref (user);
                 goto out;
