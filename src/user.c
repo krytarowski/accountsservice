@@ -463,6 +463,8 @@ move_extra_data (const gchar *old_name,
         g_free (new_filename);
 }
 
+#if GLIB_CHECK_VERSION(2,38,0)
+
 static GVariant *
 user_extension_get_value (User                    *user,
                           GDBusInterfaceInfo      *interface,
@@ -715,6 +717,15 @@ user_register_extensions (User *user)
                                                                               user->object_path, iface,
                                                                               &vtable, user, NULL, NULL);
 }
+
+#else /* !GLIB_CHECK_VERSION (2,38,0) */
+
+static void
+user_register_extensions (User *user)
+{
+}
+
+#endif /* !GLIB_CHECK_VERSION (2,38,0) */
 
 static gchar *
 compute_object_path (User *user)
