@@ -28,6 +28,7 @@
 
 #include "types.h"
 #include "user.h"
+#include "group.h"
 #include "accounts-generated.h"
 
 G_BEGIN_DECLS
@@ -57,6 +58,8 @@ typedef enum {
         ERROR_USER_DOES_NOT_EXIST,
         ERROR_PERMISSION_DENIED,
         ERROR_NOT_SUPPORTED,
+        ERROR_GROUP_EXISTS,
+        ERROR_GROUP_DOES_NOT_EXIST,
         NUM_ERRORS
 } Error;
 
@@ -75,6 +78,11 @@ User *daemon_local_find_user_by_id   (Daemon                *daemon,
                                       uid_t                  uid);
 User *daemon_local_find_user_by_name (Daemon                *daemon,
                                       const gchar           *name);
+Group *daemon_local_find_group_by_id   (Daemon                *daemon,
+                                        gid_t                  gid);
+Group *daemon_local_find_group_by_name (Daemon                *daemon,
+                                        const gchar           *name);
+
 User *daemon_local_get_automatic_login_user (Daemon         *daemon);
 
 typedef void (*AuthorizedCallback)   (Daemon                *daemon,
@@ -98,6 +106,8 @@ gboolean   daemon_local_set_automatic_login (Daemon         *daemon,
 
 GHashTable * daemon_read_extension_ifaces (void);
 GHashTable * daemon_get_extension_ifaces (Daemon *daemon);
+
+User  *daemon_local_get_user (Daemon *daemon, const gchar *object_path);
 
 G_END_DECLS
 

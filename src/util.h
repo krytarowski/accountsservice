@@ -40,6 +40,9 @@ gint get_user_groups (const gchar  *username,
                       gid_t         group,
                       gid_t       **groups);
 
+void strv_sort (GStrv strv);
+gboolean strv_equal (GStrv a, GStrv b);
+
 G_END_DECLS
 
 #endif /* __UTIL_H__ */

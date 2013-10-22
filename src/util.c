@@ -21,6 +21,7 @@
 
 #include "config.h"
 
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -312,4 +313,35 @@ get_caller_uid (GDBusMethodInvocation *context,
         g_variant_unref (reply);
 
         return TRUE;
+}
+
+gboolean
+strv_equal (GStrv a, GStrv b)
+{
+        int i;
+
+        if (a == NULL && b == NULL)
+                return TRUE;
+
+        if (a == NULL || b == NULL)
+                return FALSE;
+
+        for (i = 0; a[i] && b[i]; i++)
+                if (strcmp (a[i], b[i]) != 0)
+                        return FALSE;
+
+        return a[i] == NULL && b[i] == NULL;
+}
+
+static int
+cmpstringp(const void *p1, const void *p2)
+{
+        return strcmp(* (char * const *) p1, * (char * const *) p2);
+}
+
+void
+strv_sort (GStrv a)
+{
+        int n = g_strv_length (a);
+        qsort (a, n, sizeof (gchar *), cmpstringp);
 }

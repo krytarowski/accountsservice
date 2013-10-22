@@ -214,6 +214,140 @@
       </doc:doc>
     </signal>
 
+    <method name="ListCachedGroups">
+      <annotation name="org.freedesktop.DBus.GLib.Async" value=""/>
+      <arg name="users" direction="out" type="ao">
+        <doc:doc><doc:summary>Object paths of cached groups</doc:summary></doc:doc>
+      </arg>
+
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Lists the groups that are currently known to the system.
+            Groups that are defined locally are always known, but
+            remotely defined groups might only become known after they
+            have been explicitly mentioned in a call to
+            FindGroupByName, or similar operations.
+          </doc:para>
+        </doc:description>
+      </doc:doc>
+    </method>
+
+    <method name="FindGroupById">
+      <annotation name="org.freedesktop.DBus.GLib.Async" value=""/>
+      <arg name="id" direction="in" type="x">
+        <doc:doc><doc:summary>The gid to look up</doc:summary></doc:doc>
+      </arg>
+      <arg name="group" direction="out" type="o">
+        <doc:doc><doc:summary>Object path of group</doc:summary></doc:doc>
+      </arg>
+
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Finds a group by gid.
+          </doc:para>
+        </doc:description>
+        <doc:errors>
+          <doc:error name="org.freedesktop.Accounts.Error.Failed">if no group with the given gid exists</doc:error>
+        </doc:errors>
+      </doc:doc>
+    </method>
+
+    <method name="FindGroupByName">
+      <annotation name="org.freedesktop.DBus.GLib.Async" value=""/>
+      <arg name="name" direction="in" type="s">
+        <doc:doc><doc:summary>The groupname to look up</doc:summary></doc:doc>
+      </arg>
+      <arg name="group" direction="out" type="o">
+        <doc:doc><doc:summary>Object path of group</doc:summary></doc:doc>
+      </arg>
+
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Finds a group by its groupname.
+          </doc:para>
+        </doc:description>
+        <doc:errors>
+          <doc:error name="org.freedesktop.Accounts.Error.Failed">if no group with the given groupname exists</doc:error>
+        </doc:errors>
+      </doc:doc>
+    </method>
+
+    <method name="CreateGroup">
+      <annotation name="org.freedesktop.DBus.GLib.Async" value=""/>
+      <arg name="name" direction="in" type="s">
+        <doc:doc><doc:summary>The groupname for the new group</doc:summary></doc:doc>
+      </arg>
+      <annotation name="org.freedesktop.DBus.GLib.Async" value=""/>
+      <arg name="group" direction="out" type="o">
+        <doc:doc><doc:summary>Object path of the new group</doc:summary></doc:doc>
+      </arg>
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Creates a new group.
+          </doc:para>
+        </doc:description>
+        <doc:permission>
+          The caller needs the org.freedesktop.accounts.user-administration PolicyKit authorization.
+        </doc:permission>
+        <doc:errors>
+          <doc:error name="org.freedesktop.Accounts.Error.PermissionDenied">if the caller lacks the appropriate PolicyKit authorization</doc:error>
+          <doc:error name="org.freedesktop.Accounts.Error.Failed">if the operation failed</doc:error>
+        </doc:errors>
+      </doc:doc>
+    </method>
+
+    <method name="DeleteGroup">
+      <annotation name="org.freedesktop.DBus.GLib.Async" value=""/>
+      <arg name="id" direction="in" type="x">
+        <doc:doc><doc:summary>The gid to delete</doc:summary></doc:doc>
+      </arg>
+
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Deletes a user account.
+          </doc:para>
+        </doc:description>
+        <doc:permission>
+          The caller needs the org.freedesktop.accounts.user-administration PolicyKit authorization.
+        </doc:permission>
+        <doc:errors>
+          <doc:error name="org.freedesktop.Accounts.Error.PermissionDenied">if the caller lacks the appropriate PolicyKit authorization</doc:error>
+          <doc:error name="org.freedesktop.Accounts.Error.Failed">if the operation failed</doc:error>
+        </doc:errors>
+      </doc:doc>
+    </method>
+
+    <signal name="GroupAdded">
+      <arg name="user" type="o">
+        <doc:doc><doc:summary>Object path of the group that was added.</doc:summary></doc:doc>
+      </arg>
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Emitted when a group becomes known to the local system.
+          </doc:para>
+        </doc:description>
+      </doc:doc>
+    </signal>
+
+    <signal name="GroupDeleted">
+      <arg name="user" type="o">
+        <doc:doc><doc:summary>Object path of the group that was deleted.</doc:summary></doc:doc>
+      </arg>
+      <doc:doc>
+        <doc:description>
+          <doc:para>
+            Emitted when a group is no longer known to the local system.
+          </doc:para>
+        </doc:description>
+      </doc:doc>
+    </signal>
+
    <property name="DaemonVersion" type="s" access="read">
      <doc:doc>
        <doc:description>

@@ -70,6 +70,7 @@ enum {
         PROP_AUTOMATIC_LOGIN,
         PROP_SYSTEM_ACCOUNT,
         PROP_LOCAL_ACCOUNT,
+        PROP_CACHED_GROUPS
 };
 
 struct User {
@@ -104,9 +105,12 @@ struct User {
         gboolean      automatic_login;
         gboolean      system_account;
         gboolean      local_account;
+        GStrv         cached_groups;
 
         guint        *extension_ids;
         guint         n_extension_ids;
+
+        GStrv         cached_groups_stage;
 };
 
 typedef struct UserClass
@@ -391,6 +395,39 @@ user_update_system_account_property (User          *user,
                 return;
         user->system_account = system;
         g_object_notify (G_OBJECT (user), "system-account");
+}
+
+void
+user_reset_cached_groups (User *user)
+{
+        user->cached_groups_stage = g_malloc_n (1, sizeof(gchar*));
+        user->cached_groups_stage[0] = NULL;
+}
+
+void
+user_add_cached_group (User          *user,
+                       Group         *group)
+{
+        int n = g_strv_length (user->cached_groups_stage);
+        n += 1;
+        user->cached_groups_stage = g_realloc_n (user->cached_groups_stage,
+                                                 n+1, sizeof(gchar*));
+        user->cached_groups_stage[n-1] = g_strdup (group_get_object_path (group));
+        user->cached_groups_stage[n] = NULL;
+}
+
+void
+user_finish_cached_groups (User *user)
+{
+        strv_sort (user->cached_groups_stage);
+        if (!strv_equal (user->cached_groups, user->cached_groups_stage)) {
+                g_strfreev (user->cached_groups);
+                user->cached_groups = user->cached_groups_stage;
+                g_object_notify (G_OBJECT (user), "cached-groups");
+                accounts_user_emit_changed (ACCOUNTS_USER (user));
+        } else
+                g_strfreev (user->cached_groups_stage);
+        user->cached_groups_stage = NULL;
 }
 
 static void
@@ -752,8 +789,6 @@ user_register (User *user)
                 return;
         }
 
-        user->object_path = compute_object_path (user);
-
         if (!g_dbus_interface_skeleton_export (G_DBUS_INTERFACE_SKELETON (user),
                                                user->system_bus_connection,
                                                user->object_path,
@@ -811,6 +846,8 @@ user_new (Daemon *daemon,
         user->daemon = daemon;
         user->uid = uid;
 
+        user->object_path = compute_object_path (user);
+
         return user;
 }
 
@@ -842,6 +879,12 @@ uid_t
 user_get_uid (User *user)
 {
         return user->uid;
+}
+
+uid_t
+user_get_gid (User *user)
+{
+        return user->gid;
 }
 
 const gchar *
@@ -1167,6 +1210,17 @@ user_set_x_session (AccountsUser          *auser,
                                  g_strdup (x_session),
                                  (GDestroyNotify) g_free);
 
+        return TRUE;
+}
+
+static gboolean
+user_find_groups (AccountsUser          *auser,
+                  GDBusMethodInvocation *context,
+                  gboolean               indirect)
+{
+        User *user = (User*)auser;
+
+        accounts_user_complete_find_groups (auser, context, (const gchar *const *)user->cached_groups);
         return TRUE;
 }
 
@@ -2248,6 +2302,9 @@ user_get_property (GObject    *object,
         case PROP_LOCAL_ACCOUNT:
                 g_value_set_boolean (value, user->local_account);
                 break;
+        case PROP_CACHED_GROUPS:
+                g_value_set_boxed (value, user->cached_groups);
+                break;
         default:
                 G_OBJECT_WARN_INVALID_PROPERTY_ID (object, param_id, pspec);
                 break;
@@ -2285,6 +2342,7 @@ user_accounts_user_iface_init (AccountsUserIface *iface)
         iface->handle_set_shell = user_set_shell;
         iface->handle_set_user_name = user_set_user_name;
         iface->handle_set_xsession = user_set_x_session;
+        iface->handle_find_groups = user_find_groups;
         iface->get_uid = user_real_get_uid;
         iface->get_user_name = user_real_get_user_name;
         iface->get_real_name = user_real_get_real_name;
@@ -2309,7 +2367,6 @@ user_accounts_user_iface_init (AccountsUserIface *iface)
 static void
 user_init (User *user)
 {
-        user->system_bus_connection = NULL;
         user->object_path = NULL;
         user->user_name = NULL;
         user->real_name = NULL;
