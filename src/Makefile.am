@@ -34,7 +34,6 @@ accounts_daemon_SOURCES = 	\
 	types.h			\
 	daemon.h		\
 	daemon.c		\
-	extensions.c		\
 	user-classify.h		\
 	user-classify.c		\
 	user.h			\
