@@ -2,6 +2,7 @@
 <!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN" "http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd" [
 <!ENTITY dbus-Accounts SYSTEM "@srcdir@/org.freedesktop.Accounts.ref.xml">
 <!ENTITY dbus-User SYSTEM "@srcdir@/org.freedesktop.Accounts.User.ref.xml">
+<!ENTITY dbus-Group SYSTEM "@srcdir@/org.freedesktop.Accounts.Group.ref.xml">
 ]>
 
 <book id="index">
@@ -57,6 +58,7 @@
 
       &dbus-Accounts;
       &dbus-User;
+      &dbus-Group;
 
     </reference>
   </part>

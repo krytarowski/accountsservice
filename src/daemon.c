@@ -23,7 +23,6 @@
 #include "config.h"
 
 #include <stdlib.h>
-#include <stdio.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -65,6 +64,9 @@ struct DaemonPrivate {
         GDBusProxy *bus_proxy;
 
         GHashTable *users;
+        GHashTable *groups;
+
+        GHashTable *objpath_to_users;
 
         User *autologin;
 
@@ -83,7 +85,8 @@ struct DaemonPrivate {
         GHashTable *extension_ifaces;
 };
 
-typedef struct passwd * (* EntryGeneratorFunc) (GHashTable *, gpointer *);
+typedef struct passwd * (* UserEntryGeneratorFunc) (GHashTable *, gpointer *);
+typedef struct group * (* GroupEntryGeneratorFunc) (GHashTable *, gpointer *);
 
 static void daemon_accounts_accounts_iface_init (AccountsAccountsIface *iface);
 
@@ -97,7 +100,9 @@ static const GDBusErrorEntry accounts_error_entries[] =
         { ERROR_USER_EXISTS, "org.freedesktop.Accounts.Error.UserExists" },
         { ERROR_USER_DOES_NOT_EXIST, "org.freedesktop.Accounts.Error.UserDoesNotExist" },
         { ERROR_PERMISSION_DENIED, "org.freedesktop.Accounts.Error.PermissionDenied" },
-        { ERROR_NOT_SUPPORTED, "org.freedesktop.Accounts.Error.NotSupported" }
+        { ERROR_NOT_SUPPORTED, "org.freedesktop.Accounts.Error.NotSupported" },
+        { ERROR_GROUP_EXISTS, "org.freedesktop.Accounts.Error.GroupExists" },
+        { ERROR_GROUP_DOES_NOT_EXIST, "org.freedesktop.Accounts.Error.GroupDoesNotExist" }
 };
 
 GQuark
@@ -128,12 +133,75 @@ error_get_type (void)
           ENUM_ENTRY (ERROR_USER_DOES_NOT_EXIST, "UserDoesntExist"),
           ENUM_ENTRY (ERROR_PERMISSION_DENIED, "PermissionDenied"),
           ENUM_ENTRY (ERROR_NOT_SUPPORTED, "NotSupported"),
+          ENUM_ENTRY (ERROR_GROUP_EXISTS, "GroupExists"),
           { 0, 0, 0 }
         };
       g_assert (NUM_ERRORS == G_N_ELEMENTS (values) - 1);
       etype = g_enum_register_static ("Error", values);
     }
   return etype;
+}
+
+
+static gboolean
+daemon_local_group_is_excluded (Daemon *daemon, struct group *grent)
+{
+        // We ignore groups that are the primary group of a same-named
+        // user.
+
+        struct passwd *pwent = getpwnam (grent->gr_name);
+        if (pwent && pwent->pw_gid == grent->gr_gid)
+                return TRUE;
+
+        return FALSE;
+}
+
+static void
+register_user (Daemon *daemon,
+               User   *user)
+{
+        user_register (user);
+        g_hash_table_insert (daemon->priv->objpath_to_users, (gchar *)user_get_object_path (user), user);
+}
+
+static void
+unregister_user (Daemon *daemon,
+                 User   *user)
+{
+        g_hash_table_remove (daemon->priv->objpath_to_users, user_get_object_path (user));
+        user_unregister (user);
+}
+
+User *
+daemon_local_get_user (Daemon *daemon,
+                       const gchar *object_path)
+{
+        return g_hash_table_lookup (daemon->priv->objpath_to_users, object_path);
+}
+
+static void
+register_group (Daemon *daemon,
+                Group  *group)
+{
+        GError *error = NULL;
+
+        if (!g_dbus_interface_skeleton_export (G_DBUS_INTERFACE_SKELETON (group),
+                                               daemon->priv->bus_connection,
+                                               group_get_object_path (group),
+                                               &error)) {
+                if (error != NULL) {
+                        g_critical ("error exporting group object: %s", error->message);
+                        g_error_free (error);
+                }
+                return;
+        }
+}
+
+static void
+unregister_group (Daemon *daemon,
+                  Group  *group)
+{
+        g_dbus_interface_skeleton_unexport (G_DBUS_INTERFACE_SKELETON (group));
 }
 
 #ifdef HAVE_UTMPX_H
@@ -400,10 +468,39 @@ entry_generator_cachedir (GHashTable *users,
         return NULL;
 }
 
+static struct group *
+entry_generator_fgetgrent (GHashTable *users,
+                           gpointer   *state)
+{
+        struct group *grent;
+        FILE *fp;
+
+        /* First iteration */
+        if (*state == NULL) {
+                *state = fp = fopen (PATH_GROUP, "r");
+                if (fp == NULL) {
+                        g_warning ("Unable to open %s: %s", PATH_GROUP, g_strerror (errno));
+                        return NULL;
+                }
+        }
+
+        /* Every iteration */
+        fp = *state;
+        grent = fgetgrent (fp);
+        if (grent != NULL) {
+                return grent;
+        }
+
+        /* Last iteration */
+        fclose (fp);
+        *state = NULL;
+        return NULL;
+}
+
 static void
-load_entries (Daemon             *daemon,
-              GHashTable         *users,
-              EntryGeneratorFunc  entry_generator)
+load_user_entries (Daemon                 *daemon,
+                   GHashTable             *users,
+                   UserEntryGeneratorFunc  entry_generator)
 {
         gpointer generator_state = NULL;
         struct passwd *pwent;
@@ -446,6 +543,53 @@ load_entries (Daemon             *daemon,
         g_assert (generator_state == NULL);
 }
 
+static void
+load_group_entries (Daemon                  *daemon,
+                    GHashTable              *users,
+                    GHashTable              *groups,
+                    GroupEntryGeneratorFunc  entry_generator)
+{
+        gpointer generator_state = NULL;
+        struct group *grent;
+        Group *group = NULL;
+
+        g_assert (entry_generator != NULL);
+
+        for (;;) {
+                grent = entry_generator (groups, &generator_state);
+                if (grent == NULL)
+                        break;
+
+                /* Skip excluded groups... */
+                if (daemon_local_group_is_excluded (daemon, grent)) {
+                        g_debug ("skipping group: %s", grent->gr_name);
+                        continue;
+                }
+
+                /* ignore duplicate entries */
+                if (g_hash_table_lookup (groups, grent->gr_name)) {
+                        continue;
+                }
+
+                group = g_hash_table_lookup (daemon->priv->groups, grent->gr_name);
+                if (group == NULL) {
+                        group = group_new (daemon, grent->gr_gid);
+                } else {
+                        g_object_ref (group);
+                }
+
+                /* freeze & update group */
+                g_object_freeze_notify (G_OBJECT (group));
+                group_update_from_grent (group, grent, users);
+
+                g_hash_table_insert (groups, g_strdup (group_get_group_name (group)), group);
+                g_debug ("loaded group: %s", group_get_group_name (group));
+        }
+
+        /* Generator should have cleaned up */
+        g_assert (generator_state == NULL);
+}
+
 static GHashTable *
 create_users_hash_table (void)
 {
@@ -455,18 +599,67 @@ create_users_hash_table (void)
                                       g_object_unref);
 }
 
+static GHashTable *
+create_groups_hash_table (void)
+{
+        return g_hash_table_new_full (g_str_hash,
+                                      g_str_equal,
+                                      g_free,
+                                      g_object_unref);
+}
+
 static void
-reload_users (Daemon *daemon)
+update_user_cached_groups (GHashTable *users, GHashTable *groups)
+{
+        GHashTable *objpath_to_user;
+        GHashTableIter iter;
+        gpointer name;
+        User *user;
+        Group *group;
+
+        objpath_to_user = g_hash_table_new (g_str_hash, g_str_equal);
+
+        g_hash_table_iter_init (&iter, users);
+        while (g_hash_table_iter_next (&iter, &name, (gpointer *)&user)) {
+                g_hash_table_insert (objpath_to_user, (gchar *)user_get_object_path (user), user);
+                user_reset_cached_groups (user);
+        }
+
+        g_hash_table_iter_init (&iter, groups);
+        while (g_hash_table_iter_next (&iter, &name, (gpointer *)&group)) {
+                GStrv members = group_get_users (group);
+                int i;
+                for (i = 0; members[i]; i++) {
+                        User *user = g_hash_table_lookup (objpath_to_user, members[i]);
+                        if (user)
+                                user_add_cached_group (user, group);
+                }
+        }
+
+        g_hash_table_iter_init (&iter, users);
+        while (g_hash_table_iter_next (&iter, &name, (gpointer *)&user)) {
+                user_finish_cached_groups (user);
+        }
+
+        g_hash_table_destroy (objpath_to_user);
+}
+
+static void
+reload_users_and_groups (Daemon *daemon)
 {
         GHashTable *users;
         GHashTable *old_users;
+        GHashTable *groups;
+        GHashTable *old_groups;
         GHashTable *local;
         GHashTableIter iter;
         gpointer name;
         User *user;
+        Group *group;
 
-        /* Track the users that we saw during our (re)load */
+        /* Track the users and groups that we saw during our (re)load */
         users = create_users_hash_table ();
+        groups = create_groups_hash_table ();
 
         /*
          * NOTE: As we load data from all the sources, notifies are
@@ -475,7 +668,7 @@ reload_users (Daemon *daemon)
          */
 
         /* Load the local users into our hash table */
-        load_entries (daemon, users, entry_generator_fgetpwent);
+        load_user_entries (daemon, users, entry_generator_fgetpwent);
         local = g_hash_table_new (g_str_hash, g_str_equal);
         g_hash_table_iter_init (&iter, users);
         while (g_hash_table_iter_next (&iter, &name, NULL))
@@ -483,9 +676,9 @@ reload_users (Daemon *daemon)
 
         /* Now add/update users from other sources, possibly non-local */
 #ifdef HAVE_UTMPX_H
-        load_entries (daemon, users, entry_generator_wtmp);
+        load_user_entries (daemon, users, entry_generator_wtmp);
 #endif
-        load_entries (daemon, users, entry_generator_cachedir);
+        load_user_entries (daemon, users, entry_generator_cachedir);
 
         /* Mark which users are local, which are not */
         g_hash_table_iter_init (&iter, users);
@@ -493,6 +686,12 @@ reload_users (Daemon *daemon)
                 user_update_local_account_property (user, g_hash_table_lookup (local, name) != NULL);
 
         g_hash_table_destroy (local);
+
+        /* Now the groups.
+         */
+        load_group_entries (daemon, users, groups, entry_generator_fgetgrent);
+
+        update_user_cached_groups (users, groups);
 
         /* Swap out the users */
         old_users = daemon->priv->users;
@@ -502,7 +701,7 @@ reload_users (Daemon *daemon)
         g_hash_table_iter_init (&iter, old_users);
         while (g_hash_table_iter_next (&iter, &name, (gpointer *)&user)) {
                 if (!g_hash_table_lookup (users, name)) {
-                        user_unregister (user);
+                        unregister_user (daemon, user);
                         accounts_accounts_emit_user_deleted (ACCOUNTS_ACCOUNTS (daemon),
                                                              user_get_object_path (user));
                 }
@@ -512,7 +711,7 @@ reload_users (Daemon *daemon)
         g_hash_table_iter_init (&iter, users);
         while (g_hash_table_iter_next (&iter, &name, (gpointer *)&user)) {
                 if (!g_hash_table_lookup (old_users, name)) {
-                        user_register (user);
+                        register_user (daemon, user);
                         accounts_accounts_emit_user_added (ACCOUNTS_ACCOUNTS (daemon),
                                                            user_get_object_path (user));
                 }
@@ -520,12 +719,40 @@ reload_users (Daemon *daemon)
         }
 
         g_hash_table_destroy (old_users);
+
+        /* Swap out the groups.
+         */
+        old_groups = daemon->priv->groups;
+        daemon->priv->groups = groups;
+
+        /* Remove all the old groups */
+        g_hash_table_iter_init (&iter, old_groups);
+        while (g_hash_table_iter_next (&iter, &name, (gpointer *)&group)) {
+                if (!g_hash_table_lookup (groups, name)) {
+                        unregister_group (daemon, group);
+                        accounts_accounts_emit_group_deleted (ACCOUNTS_ACCOUNTS (daemon),
+                                                              group_get_object_path (group));
+                }
+        }
+
+        /* Register all the new groups */
+        g_hash_table_iter_init (&iter, groups);
+        while (g_hash_table_iter_next (&iter, &name, (gpointer *)&group)) {
+                if (!g_hash_table_lookup (old_groups, name)) {
+                        register_group (daemon, group);
+                        accounts_accounts_emit_group_added (ACCOUNTS_ACCOUNTS (daemon),
+                                                            group_get_object_path (group));
+                }
+                g_object_thaw_notify (G_OBJECT (group));
+        }
+
+        g_hash_table_destroy (old_groups);
 }
 
 static gboolean
-reload_users_timeout (Daemon *daemon)
+reload_users_and_groups_timeout (Daemon *daemon)
 {
-        reload_users (daemon);
+        reload_users_and_groups (daemon);
         daemon->priv->reload_id = 0;
 
         return FALSE;
@@ -582,7 +809,7 @@ reload_autologin_timeout (Daemon *daemon)
 }
 
 static void
-queue_reload_users_soon (Daemon *daemon)
+queue_reload_users_and_groups_soon (Daemon *daemon)
 {
         if (daemon->priv->reload_id > 0) {
                 return;
@@ -591,17 +818,17 @@ queue_reload_users_soon (Daemon *daemon)
         /* we wait half a second or so in case /etc/passwd and
          * /etc/shadow are changed at the same time, or repeatedly.
          */
-        daemon->priv->reload_id = g_timeout_add (500, (GSourceFunc)reload_users_timeout, daemon);
+        daemon->priv->reload_id = g_timeout_add (500, (GSourceFunc)reload_users_and_groups_timeout, daemon);
 }
 
 static void
-queue_reload_users (Daemon *daemon)
+queue_reload_users_and_groups (Daemon *daemon)
 {
         if (daemon->priv->reload_id > 0) {
                 return;
         }
 
-        daemon->priv->reload_id = g_idle_add ((GSourceFunc)reload_users_timeout, daemon);
+        daemon->priv->reload_id = g_idle_add ((GSourceFunc)reload_users_and_groups_timeout, daemon);
 }
 
 static void
@@ -615,18 +842,18 @@ queue_reload_autologin (Daemon *daemon)
 }
 
 static void
-on_users_monitor_changed (GFileMonitor      *monitor,
-                          GFile             *file,
-                          GFile             *other_file,
-                          GFileMonitorEvent  event_type,
-                          Daemon            *daemon)
+on_users_and_groups_monitor_changed (GFileMonitor      *monitor,
+                                     GFile             *file,
+                                     GFile             *other_file,
+                                     GFileMonitorEvent  event_type,
+                                     Daemon            *daemon)
 {
         if (event_type != G_FILE_MONITOR_EVENT_CHANGED &&
             event_type != G_FILE_MONITOR_EVENT_CREATED) {
                 return;
         }
 
-        queue_reload_users_soon (daemon);
+        queue_reload_users_and_groups_soon (daemon);
 }
 
 static void
@@ -678,6 +905,12 @@ setup_monitor (Daemon             *daemon,
         return monitor;
 }
 
+void
+daemon_reload (Daemon *daemon)
+{
+        reload_users_and_groups (daemon);
+}
+
 static void
 daemon_init (Daemon *daemon)
 {
@@ -686,28 +919,30 @@ daemon_init (Daemon *daemon)
         daemon->priv->extension_ifaces = daemon_read_extension_ifaces ();
 
         daemon->priv->users = create_users_hash_table ();
+        daemon->priv->groups = create_groups_hash_table ();
+        daemon->priv->objpath_to_users = g_hash_table_new (g_str_hash, g_str_equal);
 
         daemon->priv->passwd_monitor = setup_monitor (daemon,
                                                       PATH_PASSWD,
-                                                      on_users_monitor_changed);
+                                                      on_users_and_groups_monitor_changed);
         daemon->priv->shadow_monitor = setup_monitor (daemon,
                                                       PATH_SHADOW,
-                                                      on_users_monitor_changed);
+                                                      on_users_and_groups_monitor_changed);
         daemon->priv->group_monitor = setup_monitor (daemon,
                                                      PATH_GROUP,
-                                                     on_users_monitor_changed);
+                                                     on_users_and_groups_monitor_changed);
 
 #ifdef HAVE_UTMPX_H
         daemon->priv->wtmp_monitor = setup_monitor (daemon,
                                                     PATH_WTMP,
-                                                    on_users_monitor_changed);
+                                                    on_users_and_groups_monitor_changed);
 #endif
 
         daemon->priv->gdm_monitor = setup_monitor (daemon,
                                                    PATH_GDM_CUSTOM,
                                                    on_gdm_monitor_changed);
 
-        queue_reload_users (daemon);
+        queue_reload_users_and_groups (daemon);
         queue_reload_autologin (daemon);
 }
 
@@ -727,6 +962,8 @@ daemon_finalize (GObject *object)
                 g_object_unref (daemon->priv->bus_connection);
 
         g_hash_table_destroy (daemon->priv->users);
+        g_hash_table_destroy (daemon->priv->groups);
+        g_hash_table_destroy (daemon->priv->objpath_to_users);
 
         g_hash_table_unref (daemon->priv->extension_ifaces);
 
@@ -818,7 +1055,7 @@ add_new_user_for_pwent (Daemon        *daemon,
 
         user = user_new (daemon, pwent->pw_uid);
         user_update_from_pwent (user, pwent);
-        user_register (user);
+        register_user (daemon, user);
 
         g_hash_table_insert (daemon->priv->users,
                              g_strdup (user_get_user_name (user)),
@@ -879,6 +1116,76 @@ daemon_local_find_user_by_name (Daemon      *daemon,
                 user = add_new_user_for_pwent (daemon, pwent);
 
         return user;
+}
+
+static Group *
+add_new_group_for_grent (Daemon       *daemon,
+                         struct group *grent)
+{
+        Group *group;
+
+        group = group_new (daemon, grent->gr_gid);
+        group_update_from_grent (group, grent, daemon->priv->users);
+        register_group (daemon, group);
+
+        g_hash_table_insert (daemon->priv->groups,
+                             g_strdup (group_get_group_name (group)),
+                             group);
+
+        update_user_cached_groups (daemon->priv->users, daemon->priv->groups);
+
+        accounts_accounts_emit_group_added (ACCOUNTS_ACCOUNTS (daemon), group_get_object_path (group));
+
+        return group;
+}
+
+static Group *
+find_group_by_grent (Daemon       *daemon,
+                     struct group *grent)
+{
+        Group *group;
+
+        if (daemon_local_group_is_excluded (daemon, grent)) {
+                g_debug ("rejecting excluded group %s/%d", grent->gr_name, grent->gr_gid);
+                return NULL;
+        }
+
+        group = g_hash_table_lookup (daemon->priv->groups, grent->gr_name);
+
+        if (group == NULL)
+                group = add_new_group_for_grent (daemon, grent);
+
+        return group;
+}
+
+Group *
+daemon_local_find_group_by_id (Daemon *daemon,
+                               gid_t   gid)
+{
+        struct group *grent;
+
+        grent = getgrgid (gid);
+        if (grent == NULL) {
+                g_debug ("unable to lookup gid %d", (int)gid);
+                return NULL;
+        }
+
+        return find_group_by_grent (daemon, grent);
+}
+
+Group *
+daemon_local_find_group_by_name (Daemon      *daemon,
+                                 const gchar *name)
+{
+        struct group *grent;
+
+        grent = getgrnam (name);
+        if (grent == NULL) {
+                g_debug ("unable to lookup name %s: %s", name, g_strerror (errno));
+                return NULL;
+        }
+
+        return find_group_by_grent (daemon, grent);
 }
 
 User *
@@ -1000,6 +1307,79 @@ daemon_list_cached_users (AccountsAccounts      *accounts,
         return TRUE;
 }
 
+typedef struct {
+        Daemon *daemon;
+        GDBusMethodInvocation *context;
+} ListGroupData;
+
+
+static ListGroupData *
+list_group_data_new (Daemon                *daemon,
+                     GDBusMethodInvocation *context)
+{
+        ListGroupData *data;
+
+        data = g_new0 (ListGroupData, 1);
+
+        data->daemon = g_object_ref (daemon);
+        data->context = context;
+
+        return data;
+}
+
+static void
+list_group_data_free (ListGroupData *data)
+{
+        g_object_unref (data->daemon);
+        g_free (data);
+}
+
+static gboolean
+finish_list_cached_groups (gpointer user_data)
+{
+        ListGroupData *data = user_data;
+        GPtrArray *object_paths;
+        GHashTableIter iter;
+        const gchar *name;
+        Group *group;
+
+        object_paths = g_ptr_array_new ();
+
+        g_hash_table_iter_init (&iter, data->daemon->priv->groups);
+        while (g_hash_table_iter_next (&iter, (gpointer *)&name, (gpointer *)&group)) {
+                g_ptr_array_add (object_paths, (gpointer) group_get_object_path (group));
+        }
+        g_ptr_array_add (object_paths, NULL);
+
+        accounts_accounts_complete_list_cached_groups (NULL, data->context, (const gchar * const *) object_paths->pdata);
+
+        g_ptr_array_free (object_paths, TRUE);
+
+        list_group_data_free (data);
+
+        return FALSE;
+}
+
+static gboolean
+daemon_list_cached_groups (AccountsAccounts      *accounts,
+                           GDBusMethodInvocation *context)
+{
+        Daemon *daemon = (Daemon*)accounts;
+        ListGroupData *data;
+
+        data = list_group_data_new (daemon, context);
+
+        if (daemon->priv->reload_id > 0) {
+                /* reload in progress, wait a bit */
+                g_idle_add (finish_list_cached_groups, data);
+        }
+        else {
+                finish_list_cached_groups (data);
+        }
+
+        return TRUE;
+}
+
 static const gchar *
 daemon_get_daemon_version (AccountsAccounts *object)
 {
@@ -1031,7 +1411,7 @@ typedef struct {
 } CreateUserData;
 
 static void
-create_data_free (gpointer data)
+create_user_data_free (gpointer data)
 {
         CreateUserData *cd = data;
 
@@ -1119,7 +1499,7 @@ daemon_create_user (AccountsAccounts      *accounts,
                                  daemon_create_user_authorized_cb,
                                  context,
                                  data,
-                                 (GDestroyNotify)create_data_free);
+                                 (GDestroyNotify)create_user_data_free);
 
         return TRUE;
 }
@@ -1208,7 +1588,7 @@ daemon_uncache_user_authorized_cb (Daemon                *daemon,
 
         accounts_accounts_complete_uncache_user (NULL, context);
 
-        queue_reload_users (daemon);
+        queue_reload_users_and_groups (daemon);
 }
 
 static gboolean
@@ -1333,6 +1713,186 @@ daemon_delete_user (AccountsAccounts      *accounts,
 
         return TRUE;
 }
+
+/** Groups */
+
+static gboolean
+daemon_find_group_by_id (AccountsAccounts      *accounts,
+                         GDBusMethodInvocation *context,
+                         gint64                 gid)
+{
+        Daemon *daemon = (Daemon*)accounts;
+        Group *group;
+
+        group = daemon_local_find_group_by_id (daemon, gid);
+
+        if (group) {
+                accounts_accounts_complete_find_group_by_id (NULL, context, group_get_object_path (group));
+        }
+        else {
+                throw_error (context, ERROR_FAILED, "Failed to look up group with gid %d.", (int)gid);
+        }
+
+        return TRUE;
+}
+
+static gboolean
+daemon_find_group_by_name (AccountsAccounts      *accounts,
+                           GDBusMethodInvocation *context,
+                           const gchar           *name)
+{
+        Daemon *daemon = (Daemon*)accounts;
+        Group *group;
+
+        group = daemon_local_find_group_by_name (daemon, name);
+
+        if (group) {
+                accounts_accounts_complete_find_group_by_name (NULL, context, group_get_object_path (group));
+        }
+        else {
+                throw_error (context, ERROR_FAILED, "Failed to look up group with name %s.", name);
+        }
+
+        return TRUE;
+}
+
+typedef struct {
+        gchar *group_name;
+} CreateGroupData;
+
+static void
+create_group_data_free (gpointer data)
+{
+        CreateGroupData *cd = data;
+
+        g_free (cd->group_name);
+        g_free (cd);
+}
+
+static void
+daemon_create_group_authorized_cb (Daemon                *daemon,
+                                   User                  *dummy,
+                                   GDBusMethodInvocation *context,
+                                   gpointer               data)
+
+{
+        CreateGroupData *cd = data;
+        Group *group;
+        GError *error;
+        const gchar *argv[4];
+
+        if (getgrnam (cd->group_name) != NULL) {
+                throw_error (context, ERROR_GROUP_EXISTS, "A group with name '%s' already exists", cd->group_name);
+                return;
+        }
+
+        sys_log (context, "create group '%s'", cd->group_name);
+
+        argv[0] = "/usr/sbin/groupadd";
+        argv[1] = "--";
+        argv[2] = cd->group_name;
+        argv[3] = NULL;
+
+        error = NULL;
+        if (!spawn_with_login_uid (context, argv, &error)) {
+                throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
+                g_error_free (error);
+                return;
+        }
+
+        group = daemon_local_find_group_by_name (daemon, cd->group_name);
+
+        accounts_accounts_complete_create_group (NULL, context, group_get_object_path (group));
+}
+
+static gboolean
+daemon_create_group (AccountsAccounts      *accounts,
+                     GDBusMethodInvocation *context,
+                     const gchar           *group_name)
+{
+        Daemon *daemon = (Daemon*)accounts;
+        CreateGroupData *data;
+
+        data = g_new0 (CreateGroupData, 1);
+        data->group_name = g_strdup (group_name);
+
+        daemon_local_check_auth (daemon,
+                                 NULL,
+                                 "org.freedesktop.accounts.user-administration",
+                                 TRUE,
+                                 daemon_create_group_authorized_cb,
+                                 context,
+                                 data,
+                                 (GDestroyNotify)create_group_data_free);
+
+        return TRUE;
+}
+
+typedef struct {
+        gint64 gid;
+} DeleteGroupData;
+
+static void
+daemon_delete_group_authorized_cb (Daemon                *daemon,
+                                   User                  *dummy,
+                                   GDBusMethodInvocation *context,
+                                   gpointer               data)
+
+{
+        DeleteGroupData *gd = data;
+        GError *error;
+        struct group *grent;
+        const gchar *argv[4];
+
+        grent = getgrgid (gd->gid);
+
+        if (grent == NULL) {
+                throw_error (context, ERROR_GROUP_DOES_NOT_EXIST, "No group with gid %d found", gd->gid);
+                return;
+        }
+
+        sys_log (context, "delete group '%s' (%d)", grent->gr_name, gd->gid);
+
+        argv[0] = "/usr/sbin/groupdel";
+        argv[1] = "--";
+        argv[2] = grent->gr_name;
+        argv[3] = NULL;
+
+        error = NULL;
+        if (!spawn_with_login_uid (context, argv, &error)) {
+                throw_error (context, ERROR_FAILED, "running '%s' failed: %s", argv[0], error->message);
+                g_error_free (error);
+                return;
+        }
+
+        accounts_accounts_complete_delete_group (NULL, context);
+}
+
+
+static gboolean
+daemon_delete_group (AccountsAccounts      *accounts,
+                     GDBusMethodInvocation *context,
+                     gint64                 gid)
+{
+        Daemon *daemon = (Daemon*)accounts;
+        DeleteGroupData *data;
+
+        data = g_new0 (DeleteGroupData, 1);
+        data->gid = gid;
+
+        daemon_local_check_auth (daemon,
+                                 NULL,
+                                 "org.freedesktop.accounts.user-administration",
+                                 TRUE,
+                                 daemon_delete_group_authorized_cb,
+                                 context,
+                                 data,
+                                 (GDestroyNotify)g_free);
+
+        return TRUE;
+}
+
+/** Auth helpers */
 
 typedef struct {
         Daemon *daemon;
@@ -1616,7 +2176,14 @@ daemon_accounts_accounts_iface_init (AccountsAccountsIface *iface)
         iface->handle_find_user_by_id = daemon_find_user_by_id;
         iface->handle_find_user_by_name = daemon_find_user_by_name;
         iface->handle_list_cached_users = daemon_list_cached_users;
-        iface->get_daemon_version = daemon_get_daemon_version;
         iface->handle_cache_user = daemon_cache_user;
         iface->handle_uncache_user = daemon_uncache_user;
+
+        iface->handle_list_cached_groups = daemon_list_cached_groups;
+        iface->handle_create_group = daemon_create_group;
+        iface->handle_delete_group = daemon_delete_group;
+        iface->handle_find_group_by_id = daemon_find_group_by_id;
+        iface->handle_find_group_by_name = daemon_find_group_by_name;
+
+        iface->get_daemon_version = daemon_get_daemon_version;
 }

@@ -64,6 +64,11 @@ void           user_update_system_account_property (User          *user,
 
 void           user_register                (User          *user);
 void           user_unregister              (User          *user);
+void           user_reset_cached_groups     (User          *user);
+void           user_add_cached_group        (User          *user,
+                                             Group         *group);
+void           user_finish_cached_groups    (User          *user);
+
 void           user_changed                 (User          *user);
 
 void           user_save                    (User          *user);
@@ -73,6 +78,7 @@ gboolean       user_get_system_account      (User          *user);
 gboolean       user_get_local_account       (User          *user);
 const gchar *  user_get_object_path         (User          *user);
 uid_t          user_get_uid                 (User          *user);
+gid_t          user_get_gid                 (User          *user);
 const gchar *  user_get_shell               (User          *user);
 
 G_END_DECLS

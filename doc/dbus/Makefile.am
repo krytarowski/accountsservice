@@ -4,6 +4,7 @@ SPEC_XML_FILES =			\
 	AccountsService.xml		\
 	org.freedesktop.Accounts.ref.xml	\
 	org.freedesktop.Accounts.User.ref.xml		\
+	org.freedesktop.Accounts.Group.ref.xml		\
 	$(NULL)
 
 if DOCBOOK_DOCS_ENABLED
@@ -19,6 +20,8 @@ endif # DOCBOOK_DOCS_ENABLED
 org.freedesktop.Accounts.ref.xml : $(top_srcdir)/data/org.freedesktop.Accounts.xml spec-to-docbook.xsl
 	$(XSLTPROC) $(top_srcdir)/doc/dbus/spec-to-docbook.xsl $< | tail -n +2 > $@
 org.freedesktop.Accounts.User.ref.xml : $(top_srcdir)/data/org.freedesktop.Accounts.User.xml spec-to-docbook.xsl
+	$(XSLTPROC) $(top_srcdir)/doc/dbus/spec-to-docbook.xsl $< | tail -n +2 > $@
+org.freedesktop.Accounts.Group.ref.xml : $(top_srcdir)/data/org.freedesktop.Accounts.Group.xml spec-to-docbook.xsl
 	$(XSLTPROC) $(top_srcdir)/doc/dbus/spec-to-docbook.xsl $< | tail -n +2 > $@
 
 EXTRA_DIST =				\

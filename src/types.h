@@ -24,5 +24,6 @@
 
 typedef struct Daemon Daemon;
 typedef struct User User;
+typedef struct Group Group;
 
 #endif

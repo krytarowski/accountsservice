@@ -18,6 +18,8 @@ libaccounts_generated_la_SOURCES = \
 	accounts-generated.h		\
 	accounts-user-generated.c	\
 	accounts-user-generated.h	\
+	accounts-group-generated.c	\
+	accounts-group-generated.h	\
 	$(NULL)
 BUILT_SOURCES += $(libaccounts_generated_la_SOURCES)
 
@@ -26,6 +28,9 @@ accounts-generated.c accounts-generated.h: $(top_srcdir)/data/org.freedesktop.Ac
 
 accounts-user-generated.c accounts-user-generated.h: $(top_srcdir)/data/org.freedesktop.Accounts.User.xml Makefile
 	gdbus-codegen --generate-c-code accounts-user-generated --c-namespace Accounts --interface-prefix=org.freedesktop.Accounts. $(top_srcdir)/data/org.freedesktop.Accounts.User.xml
+
+accounts-group-generated.c accounts-group-generated.h: $(top_srcdir)/data/org.freedesktop.Accounts.Group.xml Makefile
+	gdbus-codegen --generate-c-code accounts-group-generated --c-namespace Accounts --interface-prefix=org.freedesktop.Accounts. $(top_srcdir)/data/org.freedesktop.Accounts.Group.xml
 
 libexec_PROGRAMS = accounts-daemon
 
@@ -39,6 +44,8 @@ accounts_daemon_SOURCES = 	\
 	user-classify.c		\
 	user.h			\
 	user.c			\
+	group.h			\
+	group.c			\
 	util.h			\
 	util.c			\
 	main.c

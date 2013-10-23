@@ -533,6 +533,42 @@
     </doc:doc>
   </method>
 
+  <method name="FindGroups">
+    <annotation name="org.freedesktop.DBus.GLib.Async" value=""/>
+    <arg name="indirect" direction="in" type="b">
+      <doc:doc>
+        <doc:summary>
+          Whether to also look for groups that this user is only an
+          indirect member of.
+        </doc:summary>
+      </doc:doc>
+    </arg>
+    <arg name="groups" direction="out" type="ao">
+      <doc:doc>
+        <doc:summary>
+          The groups that include this user.
+        </doc:summary>
+      </doc:doc>
+    </arg>
+    <doc:doc>
+      <doc:description>
+        <doc:para>
+          Finds all groups that this user is a member of.  This will
+          search all groups, not only the cached ones, and might thus
+          be slow.
+        </doc:para>
+        <doc:para>
+          A user is a direct member of a group when that group
+          explicitly lists the user.  A user is an indirect member of
+          a group G if it is a member of a group that is listed by G.
+        </doc:para>
+      </doc:description>
+      <doc:errors>
+        <doc:error name="org.freedesktop.Accounts.Error.Failed">if the operation failed</doc:error>
+      </doc:errors>
+    </doc:doc>
+  </method>
+
   <property name="Uid" type="t" access="read">
     <doc:doc>
       <doc:description>
@@ -761,6 +797,20 @@
       <doc:description>
         <doc:para>
           Whether the user is a local account or not.
+        </doc:para>
+      </doc:description>
+    </doc:doc>
+  </property>
+
+  <property name="CachedGroups" type="ao" access="read">
+    <doc:doc>
+      <doc:description>
+        <doc:para>
+          The cached groups that the user is a member of (directly or
+          indirectly).  This is not an exhaustive list of all groups
+          that the user is a member of; the user might be a member of
+          groups that are not currently cached.  To find all such
+          groups, use the FindGroups method.
         </doc:para>
       </doc:description>
     </doc:doc>
