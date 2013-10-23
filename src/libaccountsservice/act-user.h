@@ -28,6 +28,9 @@
 #include <sys/types.h>
 #include <glib.h>
 #include <glib-object.h>
+#include <gio/gio.h>
+
+#include "act-types.h"
 
 G_BEGIN_DECLS
 
@@ -46,12 +49,12 @@ typedef enum {
         ACT_USER_PASSWORD_MODE_NONE,
 } ActUserPasswordMode;
 
-typedef struct _ActUser ActUser;
 typedef struct _ActUserClass ActUserClass;
 
 GType          act_user_get_type                  (void) G_GNUC_CONST;
 
 const char    *act_user_get_object_path           (ActUser *user);
+ActUserManager *act_user_get_manager              (ActUser *user);
 
 uid_t          act_user_get_uid                   (ActUser   *user);
 const char    *act_user_get_user_name             (ActUser   *user);
@@ -79,6 +82,7 @@ const char    *act_user_get_icon_file             (ActUser   *user);
 const char    *act_user_get_language              (ActUser   *user);
 const char    *act_user_get_x_session             (ActUser   *user);
 const char    *act_user_get_primary_session_id    (ActUser   *user);
+ActGroup     **act_user_get_cached_groups         (ActUser   *user);
 
 gint           act_user_collate                   (ActUser   *user1,
                                                    ActUser   *user2);
@@ -109,6 +113,18 @@ void           act_user_set_locked                (ActUser    *user,
                                                    gboolean    locked);
 void           act_user_set_automatic_login       (ActUser   *user,
                                                    gboolean  enabled);
+
+ActGroup**     act_user_find_groups               (ActUser            *user,
+                                                   gboolean            indirect,
+                                                   GError             **error);
+void           act_user_find_groups_async         (ActUser            *user,
+                                                   gboolean            indirect,
+                                                   GCancellable       *cancellable,
+                                                   GAsyncReadyCallback callback,
+                                                   gpointer            user_data);
+ActGroup**     act_user_find_groups_finish        (ActUser            *user,
+                                                   GAsyncResult       *result,
+                                                   GError            **error);
 
 G_END_DECLS
 

@@ -31,6 +31,7 @@
 #include <gio/gio.h>
 
 #include "act-user-private.h"
+#include "act-user-manager-private.h"
 #include "accounts-user-generated.h"
 
 /**
@@ -106,6 +107,7 @@ enum {
 struct _ActUser {
         GObject         parent;
 
+        ActUserManager  *manager;
         GDBusConnection *connection;
         AccountsUser    *accounts_proxy;
         GDBusProxy      *object_proxy;
@@ -131,6 +133,8 @@ struct _ActUser {
 
         ActUserAccountType  account_type;
         ActUserPasswordMode password_mode;
+
+        ActGroup      **cached_groups;
 
         guint           uid_set : 1;
 
@@ -565,6 +569,17 @@ act_user_init (ActUser *user)
 }
 
 static void
+free_group_array (ActGroup **a)
+{
+        int i;
+        if (a) {
+                for (i = 0; a[i]; i++)
+                        g_object_unref (a[i]);
+                g_free (a);
+        }
+}
+
+static void
 act_user_finalize (GObject *object)
 {
         ActUser *user;
@@ -599,6 +614,8 @@ act_user_finalize (GObject *object)
         if (user->connection != NULL) {
                 g_object_unref (user->connection);
         }
+
+        free_group_array (user->cached_groups);
 
         if (G_OBJECT_CLASS (act_user_parent_class)->finalize)
                 (*G_OBJECT_CLASS (act_user_parent_class)->finalize) (object);
@@ -837,6 +854,23 @@ act_user_get_login_history (ActUser *user) {
 }
 
 /**
+ * act_user_get_cached_groups:
+ * @user: a #ActUser
+ *
+ * Returns the cached groups for @user.
+ *
+ * Returns: (transfer none): A %NULL-terminated array of pointers to #ActGroup objects.
+ *
+ * Since: 0.6.36
+ */
+ActGroup **
+act_user_get_cached_groups (ActUser *user) {
+        g_return_val_if_fail (ACT_IS_USER (user), NULL);
+
+        return user->cached_groups;
+}
+
+/**
  * act_user_collate:
  * @user1: a user
  * @user2: a user
@@ -1069,7 +1103,7 @@ act_user_get_x_session (ActUser *user)
 
 /**
  * act_user_get_object_path:
- * @user: a #ActUser
+ * @user: a user
  *
  * Returns the user accounts service object path of @user,
  * or %NULL if @user doesn't have an object path associated
@@ -1083,6 +1117,20 @@ act_user_get_object_path (ActUser *user)
         g_return_val_if_fail (ACT_IS_USER (user), NULL);
 
         return user->object_path;
+}
+
+/**
+ * act_user_get_manager:
+ * @user: a #ActUser
+ *
+ * Returns the #ActUserManager that this #ActUser object belongs to.
+ *
+ * Returns: (transfer none): the #ActUserManager
+ */
+ActUserManager *
+act_user_get_manager (ActUser *user)
+{
+        return user->manager;
 }
 
 /**
@@ -1288,6 +1336,41 @@ collect_props (const gchar *key,
                         user->x_session = g_strdup (new_x_session);
                         g_object_notify (G_OBJECT (user), "x-session");
                 }
+        } else if (strcmp (key, "CachedGroups") == 0) {
+                gboolean changed;
+                GVariantIter iter;
+                int i;
+                const gchar *group_path;
+
+                if (user->cached_groups == NULL)
+                        changed = TRUE;
+                else {
+                        changed = FALSE;
+                        i = 0;
+                        g_variant_iter_init (&iter, value);
+                        while (user->cached_groups[i] && g_variant_iter_next (&iter, "&o", &group_path)) {
+                                if (g_strcmp0 (act_group_get_object_path (user->cached_groups[i]), group_path) != 0) {
+                                        changed = TRUE;
+                                        break;
+                                }
+                                i++;
+                        }
+                        if (user->cached_groups[i] != NULL || i != g_variant_n_children (value))
+                                changed = TRUE;
+                }
+
+                if (changed) {
+                        free_group_array (user->cached_groups);
+                        user->cached_groups = g_new0 (ActGroup*, g_variant_n_children (value)+1);
+                        i = 0;
+                        g_variant_iter_init (&iter, value);
+                        while (g_variant_iter_next (&iter, "&o", &group_path)) {
+                                user->cached_groups[i] = g_object_ref(_act_user_manager_get_group (user->manager,
+                                                                                                   group_path));
+                                i++;
+                        }
+                        // g_object_notify (G_OBJECT (user), "cached-groups");
+                }
         } else {
                 handled = FALSE;
         }
@@ -1405,15 +1488,18 @@ _act_user_update_as_nonexistent (ActUser *user)
  * the object path in @object_path.
  **/
 void
-_act_user_update_from_object_path (ActUser    *user,
-                                   const char *object_path)
+_act_user_update_from_object_path (ActUserManager *manager,
+                                   ActUser        *user,
+                                   const char     *object_path)
 {
         GError *error = NULL;
 
+        g_return_if_fail (ACT_IS_USER_MANAGER (manager));
         g_return_if_fail (ACT_IS_USER (user));
         g_return_if_fail (object_path != NULL);
         g_return_if_fail (user->object_path == NULL);
 
+        user->manager = manager;
         user->object_path = g_strdup (object_path);
 
         user->accounts_proxy = accounts_user_proxy_new_sync (user->connection,
@@ -1964,4 +2050,153 @@ act_user_set_automatic_login (ActUser   *user,
                 g_warning ("SetAutomaticLogin call failed: %s", error->message);
                 g_error_free (error);
         }
+}
+
+static ActGroup **
+convert_group_paths (ActUserManager *manager,
+                     gchar **paths)
+{
+        int i, n;
+        ActGroup **res;
+
+        if (paths == NULL)
+                return NULL;
+
+        n = g_strv_length (paths);
+        res = g_new0 (ActGroup*, n+1);
+        for (i = 0; i < n; i++)
+                res[i] = g_object_ref (_act_user_manager_get_group (manager, paths[i]));
+
+        return res;
+}
+
+/**
+ * act_user_find_groups:
+ * @user: an #ActUser object
+ * @indirect: %TRUE to also list groups with indirect membership
+ * @error: a #GError
+ *
+ * Finds the groups of a user.  This operation might query remote
+ * databases and thus be slow.
+ *
+ * Returns: (transfer full): A %NULL-terminated array of pointers to
+ * #ActGroup objects.  Free it by unreffing all #ActGroup objects and
+ * then calling #g_free on the array.  Returns %NULL in case of error.
+ */
+ActGroup **
+act_user_find_groups (ActUser  *user,
+                      gboolean  indirect,
+                      GError  **error)
+{
+        GError *local_error;
+        gchar **res = NULL;
+
+        g_return_val_if_fail (ACT_IS_USER (user), FALSE);
+        g_return_val_if_fail (user->accounts_proxy != NULL, FALSE);
+
+        g_debug ("ActUser: finding groups of '%s' (uid %ld)",
+                 act_user_get_user_name (user), (long) act_user_get_uid (user));
+
+        local_error = NULL;
+        if (!accounts_user_call_find_groups_sync (user->accounts_proxy,
+                                                  indirect,
+                                                  &res,
+                                                  NULL,
+                                                  &local_error)) {
+                g_propagate_error (error, local_error);
+        }
+
+        return convert_group_paths (user->manager, res);
+}
+
+static void
+act_user_async_complete_handler (GObject      *source,
+                                 GAsyncResult *result,
+                                 gpointer      user_data)
+{
+  GSimpleAsyncResult *res = user_data;
+
+  g_simple_async_result_set_op_res_gpointer (res, g_object_ref (result), g_object_unref);
+  g_simple_async_result_complete (res);
+  g_object_unref (res);
+}
+
+/**
+ * act_user_find_groups_async:
+ * @user: an #ActUser object
+ * @indirect: %TRUE to also list groups with indirect membership
+ * @cancellable: (allow-none): optional #GCancellable object,
+ *     %NULL to ignore
+ * @callback: (scope async): a #GAsyncReadyCallback to call
+ *     when the request is satisfied
+ * @user_data: (closure): the data to pass to @callback
+ *
+ * Asynchronously finds groups.
+ *
+ * For more details, see act_user_find_groups(), which is the
+ * synchronous version of this call.
+ */
+void
+act_user_find_groups_async (ActUser             *user,
+                            gboolean             indirect,
+                            GCancellable        *cancellable,
+                            GAsyncReadyCallback  callback,
+                            gpointer             user_data)
+{
+        GSimpleAsyncResult *res;
+
+        g_return_if_fail (ACT_IS_USER (user));
+        g_return_if_fail (user->accounts_proxy != NULL);
+
+        res = g_simple_async_result_new (G_OBJECT (user),
+                                         callback, user_data,
+                                         act_user_find_groups_async);
+        g_simple_async_result_set_check_cancellable (res, cancellable);
+
+        g_debug ("ActUser: Finding groups (async) of '%s' (uid %ld)",
+                 act_user_get_user_name (user), (long) act_user_get_uid (user));
+
+        accounts_user_call_find_groups (user->accounts_proxy,
+                                        indirect,
+                                        cancellable,
+                                        act_user_async_complete_handler, res);
+}
+
+/**
+ * act_user_find_groups_finish:
+ * @user: a #ActUser
+ * @result: a #GAsyncResult
+ * @error: a #GError
+ *
+ * Finishes an asynchronous group finding.
+ *
+ * See act_user_find_groups_async().
+ *
+ * Returns: (transfer full): A %NULL-terminated array of pointers to
+ * #ActGroup objects.  Free it by unreffing all #ActGroup objects and
+ * then calling #g_free on the array.  Returns %NULL in case of error.
+ */
+ActGroup **
+act_user_find_groups_finish (ActUser         *user,
+                             GAsyncResult    *result,
+                             GError         **error)
+{
+        GAsyncResult *inner_result;
+        gchar **group_paths = NULL;
+        GSimpleAsyncResult *res;
+        GError *remote_error = NULL;
+
+        g_return_val_if_fail (g_simple_async_result_is_valid (result, G_OBJECT (user), act_user_find_groups_async), FALSE);
+        res = G_SIMPLE_ASYNC_RESULT (result);
+        inner_result = g_simple_async_result_get_op_res_gpointer (res);
+        g_assert (inner_result);
+
+        if (!accounts_user_call_find_groups_finish (user->accounts_proxy,
+                                                    &group_paths,
+                                                    inner_result, &remote_error)) {
+                g_dbus_error_strip_remote_error (remote_error);
+                g_propagate_error (error, remote_error);
+        }
+
+        return convert_group_paths (user->manager, group_paths);
 }

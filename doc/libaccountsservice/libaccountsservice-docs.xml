@@ -12,6 +12,7 @@
   <chapter>
     <title>libaccountsservice</title>
     <xi:include href="xml/act-user.xml"/>
+    <xi:include href="xml/act-group.xml"/>
     <xi:include href="xml/act-user-manager.xml"/>
   </chapter>
 

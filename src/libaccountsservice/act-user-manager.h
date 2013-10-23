@@ -24,7 +24,9 @@
 #include <glib-object.h>
 #include <gio/gio.h>
 
+#include "act-types.h"
 #include "act-user.h"
+#include "act-group.h"
 
 G_BEGIN_DECLS
 
@@ -58,7 +60,13 @@ struct _ActUserManagerClass
         void          (* user_is_logged_in_changed) (ActUserManager *user_manager,
                                                      ActUser        *user);
         void          (* user_changed)              (ActUserManager *user_manager,
-                                                     ActUser        *user);
+                                                     ActGroup        *group);
+        void          (* group_added)               (ActUserManager *user_manager,
+                                                     ActGroup        *group);
+        void          (* group_removed)             (ActUserManager *user_manager,
+                                                     ActGroup        *group);
+        void          (* group_changed)             (ActUserManager *user_manager,
+                                                     ActGroup        *group);
 };
 
 typedef enum ActUserManagerError
@@ -67,7 +75,9 @@ typedef enum ActUserManagerError
         ACT_USER_MANAGER_ERROR_USER_EXISTS,
         ACT_USER_MANAGER_ERROR_USER_DOES_NOT_EXIST,
         ACT_USER_MANAGER_ERROR_PERMISSION_DENIED,
-        ACT_USER_MANAGER_ERROR_NOT_SUPPORTED
+        ACT_USER_MANAGER_ERROR_NOT_SUPPORTED,
+        ACT_USER_MANAGER_ERROR_GROUP_EXISTS,
+        ACT_USER_MANAGER_ERROR_GROUP_DOES_NOT_EXIST
 } ActUserManagerError;
 
 #define ACT_USER_MANAGER_ERROR act_user_manager_error_quark ()
@@ -83,6 +93,12 @@ ActUser *           act_user_manager_get_user              (ActUserManager *mana
                                                             const char     *username);
 ActUser *           act_user_manager_get_user_by_id        (ActUserManager *manager,
                                                             uid_t           id);
+
+GSList *            act_user_manager_list_groups           (ActUserManager *manager);
+ActGroup *          act_user_manager_get_group             (ActUserManager *manager,
+                                                            const char     *groupname);
+ActGroup *          act_user_manager_get_group_by_id       (ActUserManager *manager,
+                                                            gid_t           id);
 
 gboolean            act_user_manager_activate_user_session (ActUserManager *manager,
                                                             ActUser        *user);
@@ -134,6 +150,30 @@ void                act_user_manager_delete_user_async     (ActUserManager     *
                                                             GAsyncReadyCallback callback,
                                                             gpointer            user_data);
 gboolean            act_user_manager_delete_user_finish    (ActUserManager     *manager,
+                                                            GAsyncResult       *result,
+                                                            GError            **error);
+
+ActGroup*           act_user_manager_create_group          (ActUserManager     *manager,
+                                                            const char         *groupname,
+                                                            GError             **error);
+void                act_user_manager_create_group_async    (ActUserManager     *manager,
+                                                            const gchar        *groupname,
+                                                            GCancellable       *cancellable,
+                                                            GAsyncReadyCallback callback,
+                                                            gpointer            user_data);
+ActGroup*           act_user_manager_create_group_finish   (ActUserManager     *manager,
+                                                            GAsyncResult       *result,
+                                                            GError            **error);
+
+gboolean            act_user_manager_delete_group          (ActUserManager     *manager,
+                                                            ActGroup            *group,
+                                                            GError             **error);
+void                act_user_manager_delete_group_async    (ActUserManager     *manager,
+                                                            ActGroup            *group,
+                                                            GCancellable       *cancellable,
+                                                            GAsyncReadyCallback callback,
+                                                            gpointer            user_data);
+gboolean            act_user_manager_delete_group_finish   (ActUserManager     *manager,
                                                             GAsyncResult       *result,
                                                             GError            **error);
 
