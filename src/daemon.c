@@ -1227,7 +1227,7 @@ daemon_uncache_user (AccountsAccounts      *accounts,
 }
 
 typedef struct {
-        gint64 uid;
+        uid_t uid;
         gboolean remove_files;
 } DeleteUserData;
 
@@ -1309,13 +1309,13 @@ daemon_delete_user (AccountsAccounts      *accounts,
         Daemon *daemon = (Daemon*)accounts;
         DeleteUserData *data;
 
-        if (uid == 0) {
+        if ((uid_t)uid == 0) {
                 throw_error (context, ERROR_FAILED, "Refuse to delete root user");
                 return TRUE;
         }
 
         data = g_new0 (DeleteUserData, 1);
-        data->uid = uid;
+        data->uid = (uid_t)uid;
         data->remove_files = remove_files;
 
         daemon_local_check_auth (daemon,
