@@ -55,10 +55,16 @@ AS_IF([test x$enable_admin_group = xauto], [
 AC_DEFINE_UNQUOTED([ADMIN_GROUP], ["$enable_admin_group"], [Define to the group for administrator users])
 
 AC_ARG_ENABLE(user-heuristics,
-        [AS_HELP_STRING([--enable-user-heuristics],[Enable heuristics for guessing system vs. human users])],
+        [AS_HELP_STRING([--enable-user-heuristics],[Enable heuristics for guessing system vs. human users in the range 500-minimum-uid])],
         [if test "$enableval" = yes; then
            AC_DEFINE([ENABLE_USER_HEURISTICS], , [System vs. human user heuristics enabled])
         fi])
+
+AC_ARG_WITH(minimum-uid,
+        [AS_HELP_STRING([--with-minimum-uid],[Set minimum uid for human users])],
+        ,with_minimum_uid=1000)
+
+AC_DEFINE_UNQUOTED([MINIMUM_UID], $with_minimum_uid, [Define to the minumum UID of human users])
 
 dnl ---------------------------------------------------------------------------
 dnl - coverage
