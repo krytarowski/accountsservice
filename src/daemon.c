@@ -1284,9 +1284,10 @@ daemon_delete_user_authorized_cb (Daemon                *daemon,
                 argv[5] = NULL;
         }
         else {
-                argv[1] = "--";
-                argv[2] = pwent->pw_name;
-                argv[3] = NULL;
+                argv[1] = "-f";
+                argv[2] = "--";
+                argv[3] = pwent->pw_name;
+                argv[4] = NULL;
         }
 
         error = NULL;
