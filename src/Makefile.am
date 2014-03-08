@@ -41,6 +41,8 @@ accounts_daemon_SOURCES = 	\
 	user.c			\
 	util.h			\
 	util.c			\
+	wtmp-helper.h		\
+	wtmp-helper.c		\
 	main.c
 
 accounts_daemon_LDADD = 	\
