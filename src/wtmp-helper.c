@@ -55,6 +55,24 @@ user_previous_login_free (UserPreviousLogin *previous_login)
         g_free (previous_login);
 }
 
+static gboolean
+wtmp_helper_start (void)
+{
+#ifdef UTXDB_LOG
+                if (setutxdb (UTXDB_LOG, NULL) != 0) {
+                        return FALSE;
+                }
+#else
+                if (utmpxname (PATH_WTMP) != 0) {
+                        return FALSE;
+                }
+
+                setutxent ();
+#endif
+
+                return TRUE;
+}
+
 struct passwd *
 wtmp_helper_entry_generator (GHashTable *users,
                              gpointer   *state)
@@ -71,14 +89,11 @@ wtmp_helper_entry_generator (GHashTable *users,
 
         if (*state == NULL) {
                 /* First iteration */
-#ifdef UTXDB_LOG
-                if (setutxdb (UTXDB_LOG, NULL) != 0) {
+
+                if (!wtmp_helper_start ())
                         return NULL;
                 }
-#else
-                utmpxname (PATH_WTMP);
-                setutxent ();
-#endif
+
                 *state = g_new (WTmpGeneratorState, 1);
                 state_data = *state;
                 state_data->login_hash = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
