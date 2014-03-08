@@ -214,6 +214,8 @@ wtmp_helper_get_path_for_monitor (void)
 {
 #if defined(WTMPX_FILENAME)
         return WTMPX_FILENAME;
+#elif defined(__FreeBSD__)
+        return "/var/log/utx.log";
 #else
 #error Do not know which filename to watch for wtmp changes
 #endif
