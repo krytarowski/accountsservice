@@ -29,8 +29,6 @@
 
 #include <utmpx.h>
 
-#define PATH_WTMP _PATH_WTMPX
-
 typedef struct {
         guint64 frequency;
         gint64 time;
@@ -58,16 +56,18 @@ user_previous_login_free (UserPreviousLogin *previous_login)
 static gboolean
 wtmp_helper_start (void)
 {
-#ifdef UTXDB_LOG
+#if defined(UTXDB_LOG)
                 if (setutxdb (UTXDB_LOG, NULL) != 0) {
                         return FALSE;
                 }
-#else
-                if (utmpxname (PATH_WTMP) != 0) {
+#elif defined(WTMPX_FILENAME)
+                if (utmpxname (WTMPX_FILENAME) != 0) {
                         return FALSE;
                 }
 
                 setutxent ();
+#else
+#error You have utmpx.h, but no known way to use it for wtmp entries
 #endif
 
                 return TRUE;
@@ -90,7 +90,7 @@ wtmp_helper_entry_generator (GHashTable *users,
         if (*state == NULL) {
                 /* First iteration */
 
-                if (!wtmp_helper_start ())
+                if (!wtmp_helper_start ()) {
                         return NULL;
                 }
 
@@ -212,7 +212,11 @@ wtmp_helper_entry_generator (GHashTable *users,
 const gchar *
 wtmp_helper_get_path_for_monitor (void)
 {
-        return PATH_WTMP;
+#if defined(WTMPX_FILENAME)
+        return WTMPX_FILENAME;
+#else
+#error Do not know which filename to watch for wtmp changes
+#endif
 }
 
 #else /* HAVE_UTMPX_H */
