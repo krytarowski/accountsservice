@@ -47,6 +47,10 @@ accounts_daemon_LDADD = 	\
 	libaccounts-generated.la	\
 	$(POLKIT_LIBS)
 
+EXTRA_DIST = \
+	fgetpwent.c	\
+	$(NULL)
+
 CLEANFILES = \
 	$(BUILT_SOURCES) \
 	*.gcda \

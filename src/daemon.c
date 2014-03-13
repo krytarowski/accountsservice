@@ -162,6 +162,10 @@ user_previous_login_free (UserPreviousLogin *previous_login)
         g_free (previous_login);
 }
 
+#ifndef HAVE_FGETPWENT
+#include "fgetpwent.c"
+#endif
+
 static struct passwd *
 entry_generator_wtmp (GHashTable *users,
                       gpointer   *state)
