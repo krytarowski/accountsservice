@@ -224,8 +224,8 @@ wtmp_helper_get_path_for_monitor (void)
 #else /* HAVE_UTMPX_H */
 
 struct passwd *
-entry_generator_wtmp (GHashTable *users,
-                      gpointer   *state)
+wtmp_helper_entry_generator (GHashTable *users,
+                             gpointer   *state)
 {
         return NULL;
 }
