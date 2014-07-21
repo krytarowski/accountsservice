@@ -1352,7 +1352,7 @@ update_info (ActUser *user)
 
         if (user->get_all_call != NULL) {
                 g_cancellable_cancel (user->get_all_call);
-                g_object_unref (user->get_all_call);
+                g_clear_object (&user->get_all_call);
         }
 
         user->get_all_call = g_cancellable_new ();
