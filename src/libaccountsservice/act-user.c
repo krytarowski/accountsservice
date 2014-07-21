@@ -1327,8 +1327,7 @@ on_get_all_finished (GObject        *object,
                 return;
         }
 
-        g_object_unref (user->get_all_call);
-        user->get_all_call = NULL;
+        g_clear_object (&user->get_all_call);
 
         g_variant_get (res, "(a{sv})", &iter);
         while (g_variant_iter_next (iter, "{sv}", &key, &value)) {
