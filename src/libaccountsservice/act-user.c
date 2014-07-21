@@ -1316,6 +1316,8 @@ on_get_all_finished (GObject        *object,
         error = NULL;
         res = g_dbus_proxy_call_finish (proxy, result, &error);
 
+        g_clear_object (&user->get_all_call);
+
         if (! res) {
                 g_debug ("Error calling GetAll() when retrieving properties for %s: %s",
                          user->object_path, error->message);
@@ -1326,8 +1328,6 @@ on_get_all_finished (GObject        *object,
                 }
                 return;
         }
-
-        g_clear_object (&user->get_all_call);
 
         g_variant_get (res, "(a{sv})", &iter);
         while (g_variant_iter_next (iter, "{sv}", &key, &value)) {
