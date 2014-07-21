@@ -935,6 +935,8 @@ update_user (ActUserManager *manager,
         username = act_user_get_user_name (user);
         if (g_hash_table_lookup (manager->priv->system_users_by_name, username) != NULL) {
                 if (!act_user_is_system_account (user)) {
+                        g_debug ("ActUserManager: %s is no longer a system account, treating as normal user",
+                                 describe_user (user));
                         g_hash_table_insert (manager->priv->normal_users_by_name,
                                              g_strdup (act_user_get_user_name (user)),
                                              g_object_ref (user));
@@ -947,6 +949,8 @@ update_user (ActUserManager *manager,
                 }
         } else {
                 if (act_user_is_system_account (user)) {
+                        g_debug ("ActUserManager: %s is no longer a normal account, treating as system user",
+                                 describe_user (user));
                         g_hash_table_insert (manager->priv->system_users_by_name,
                                              g_strdup (act_user_get_user_name (user)),
                                              g_object_ref (user));
