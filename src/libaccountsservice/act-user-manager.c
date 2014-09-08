@@ -2740,6 +2740,8 @@ act_user_manager_class_init (ActUserManagerClass *klass)
 
         /**
          * ActUserManager::user-added:
+         * @gobject: the object which received the signal
+         * @user: the #ActUser that was added
          *
          * Emitted when a user is added to the user manager.
          */
@@ -2753,6 +2755,8 @@ act_user_manager_class_init (ActUserManagerClass *klass)
                               G_TYPE_NONE, 1, ACT_TYPE_USER);
         /**
          * ActUserManager::user-removed:
+         * @gobject: the object which received the signal
+         * @user: the #ActUser that was removed
          *
          * Emitted when a user is removed from the user manager.
          */
@@ -2766,6 +2770,8 @@ act_user_manager_class_init (ActUserManagerClass *klass)
                               G_TYPE_NONE, 1, ACT_TYPE_USER);
         /**
          * ActUserManager::user-is-logged-in-changed:
+         * @gobject: the object which received the signal
+         * @user: the #ActUser that changed login status
          *
          * One of the users has logged in or out.
          */
@@ -2779,6 +2785,8 @@ act_user_manager_class_init (ActUserManagerClass *klass)
                               G_TYPE_NONE, 1, ACT_TYPE_USER);
         /**
          * ActUserManager::user-changed:
+         * @gobject: the object which received the signal
+         * @user: the #ActUser that changed
          *
          * One of the users has changed
          */
