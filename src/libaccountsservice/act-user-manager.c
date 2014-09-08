@@ -936,8 +936,7 @@ update_user (ActUserManager *manager,
 {
         const char *username;
 
-        g_debug ("ActUserManager: updating user %s",
-                 describe_user (user));
+        g_debug ("ActUserManager: updating %s", describe_user (user));
 
         username = act_user_get_user_name (user);
         if (g_hash_table_lookup (manager->priv->system_users_by_name, username) != NULL) {
