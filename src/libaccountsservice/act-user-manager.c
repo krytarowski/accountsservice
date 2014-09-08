@@ -1058,6 +1058,25 @@ out:
 }
 
 static ActUser *
+find_new_user_with_object_path (ActUserManager *manager,
+                                const char     *object_path)
+{
+        GSList *node;
+
+        g_assert (object_path != NULL);
+
+        for (node = manager->priv->new_users; node != NULL; node = node->next) {
+                ActUser *user = ACT_USER (node->data);
+                const char *user_object_path = act_user_get_object_path (user);
+                if (g_strcmp0 (user_object_path, object_path) == 0) {
+                        return user;
+                }
+        }
+
+        return NULL;
+}
+
+static ActUser *
 add_new_user_for_object_path (const char     *object_path,
                               ActUserManager *manager)
 {
@@ -1067,6 +1086,14 @@ add_new_user_for_object_path (const char     *object_path,
 
         if (user != NULL) {
                 g_debug ("ActUserManager: tracking existing %s with object path %s",
+                         describe_user (user), object_path);
+                return user;
+        }
+
+        user = find_new_user_with_object_path (manager, object_path);
+
+        if (user != NULL) {
+                g_debug ("ActUserManager: tracking existing (but very recently added) %s with object path %s",
                          describe_user (user), object_path);
                 return user;
         }
