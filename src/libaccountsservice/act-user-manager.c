@@ -927,6 +927,9 @@ remove_user (ActUserManager *manager,
                 g_debug ("ActUserManager: not yet loaded, so not emitting user-removed signal");
         }
 
+        g_debug ("ActUserManager: user '%s' (with object path %s) now removed",
+                 act_user_get_user_name (user),
+                 act_user_get_object_path (user));
         g_object_unref (user);
 }
 
