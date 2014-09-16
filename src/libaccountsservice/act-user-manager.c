@@ -2899,6 +2899,8 @@ act_user_manager_finalize (GObject *object)
         ActUserManager *manager;
         GSList         *node;
 
+        g_debug ("ActUserManager: finalizing user manager");
+
         g_return_if_fail (object != NULL);
         g_return_if_fail (ACT_IS_USER_MANAGER (object));
 
