@@ -9,7 +9,7 @@ EXTRA_DIST =
 CLEANFILES =
 EOF
 else
-        gtkdocize || exit $?
+        (cd $(dirname $0) && gtkdocize) || exit $?
 fi
 
 ACLOCAL="aclocal $ACLOCAL_FLAGS"
