@@ -3353,6 +3353,90 @@ act_user_manager_uncache_user (ActUserManager     *manager,
         return TRUE;
 }
 
+/*
+ * act_user_manager_uncache_user_async:
+ * @manager: a #ActUserManager
+ * @username: a unix user name
+ * @cancellable: (allow-none): optional #GCancellable object,
+ *     %NULL to ignore
+ * @callback: (scope async): a #GAsyncReadyCallback to call
+ *     when the request is satisfied
+ * @user_data: (closure): the data to pass to @callback
+ *
+ * Asynchronously uncaches a user account.
+ *
+ * For more details, see act_user_manager_uncache_user(), which
+ * is the synchronous version of this call.
+ *
+ * Since: 0.6.39
+ */
+void
+act_user_manager_uncache_user_async (ActUserManager      *manager,
+                                     const char          *username,
+                                     GCancellable        *cancellable,
+                                     GAsyncReadyCallback  callback,
+                                     gpointer             user_data)
+{
+        GSimpleAsyncResult *res;
+
+        g_return_if_fail (ACT_IS_USER_MANAGER (manager));
+        g_return_if_fail (username != NULL);
+        g_return_if_fail (manager->priv->accounts_proxy != NULL);
+
+        g_debug ("ActUserManager: Uncaching user (async) '%s'", username);
+
+        res = g_simple_async_result_new (G_OBJECT (manager),
+                                         callback, user_data,
+                                         act_user_manager_uncache_user_async);
+        g_simple_async_result_set_check_cancellable (res, cancellable);
+
+        accounts_accounts_call_uncache_user (manager->priv->accounts_proxy,
+                                             username,
+                                             cancellable,
+                                             act_user_manager_async_complete_handler, res);
+}
+
+/**
+ * act_user_manager_uncache_user_finish:
+ * @manager: a #ActUserManager
+ * @result: a #GAsyncResult
+ * @error: a #GError
+ *
+ * Finishes an asynchronous user uncaching.
+ *
+ * See act_user_manager_uncache_user_async().
+ *
+ * Returns: %TRUE if the user account was successfully uncached
+ *
+ * Since: 0.6.39
+ */
+gboolean
+act_user_manager_uncache_user_finish (ActUserManager  *manager,
+                                      GAsyncResult    *result,
+                                      GError         **error)
+{
+        GAsyncResult *inner_result;
+        gboolean success;
+        GSimpleAsyncResult *res;
+        GError *remote_error = NULL;
+
+        g_return_val_if_fail (g_simple_async_result_is_valid (result, G_OBJECT (manager), act_user_manager_uncache_user_async), FALSE);
+
+        res = G_SIMPLE_ASYNC_RESULT (result);
+        inner_result = g_simple_async_result_get_op_res_gpointer (res);
+        g_assert (inner_result);
+
+        success = accounts_accounts_call_uncache_user_finish (manager->priv->accounts_proxy,
+                                                              inner_result, &remote_error);
+
+        if (remote_error) {
+                g_dbus_error_strip_remote_error (remote_error);
+                g_propagate_error (error, remote_error);
+        }
+
+        return success;
+}
+
 /**
  * act_user_manager_delete_user:
  * @manager: a #ActUserManager
