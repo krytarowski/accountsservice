@@ -1,3 +1,9 @@
+Changes in 0.6.38
+=================
+* Fix polkit policy for non-desktop cases
+* Fix for a race when new user appears
+* Some clearer log and debug messages
+
 Changes in 0.6.37
 =================
 * BSD fixes
