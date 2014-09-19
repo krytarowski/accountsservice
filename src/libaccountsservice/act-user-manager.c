@@ -869,9 +869,9 @@ add_user (ActUserManager *manager,
 
         object_path = act_user_get_object_path (user);
         if (object_path != NULL) {
-                g_hash_table_insert (manager->priv->users_by_object_path,
-                                     (gpointer) object_path,
-                                     g_object_ref (user));
+                g_hash_table_replace (manager->priv->users_by_object_path,
+                                      (gpointer) object_path,
+                                      g_object_ref (user));
         }
 
         g_signal_connect_object (user,
