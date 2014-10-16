@@ -1,3 +1,10 @@
+Changes in 0.6.39
+=================
+* Fix ListCachedUsers race at startup
+* Add new api for uncaching user
+* Fix memory corruption bug
+* Build goo changes
+
 Changes in 0.6.38
 =================
 * Fix polkit policy for non-desktop cases
