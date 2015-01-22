@@ -1627,7 +1627,7 @@ act_user_set_language (ActUser    *user,
                                                    language,
                                                    NULL,
                                                    &error)) {
-                g_warning ("SetLanguage call failed: %s", error->message);
+                g_warning ("SetLanguage for language %s failed: %s", language, error->message);
                 g_error_free (error);
                 return;
         }
