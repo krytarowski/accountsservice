@@ -1,3 +1,9 @@
+Changes in 0.6.40
+=================
+* Support large UIDs better
+* don't require X11 display to fetch user with X11 session
+* ensure accountsservice doesn't start before NSS works
+
 Changes in 0.6.39
 =================
 * Fix ListCachedUsers race at startup
