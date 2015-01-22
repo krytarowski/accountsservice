@@ -1648,15 +1648,15 @@ _get_x11_display_for_new_systemd_session (ActUserManagerNewSession *new_session)
                                       &x11_display);
 
         if (res < 0) {
-                g_warning ("ActUserManager: Failed to get the x11 display of session '%s': %s",
-                           new_session->id,
-                           strerror (-res));
-                unload_new_session (new_session);
-                return;
+                g_debug ("ActUserManager: Failed to get the x11 display of session '%s': %s",
+                         new_session->id,
+                         strerror (-res));
+                g_debug ("ActUserManager: Treating X11 display as blank");
+                x11_display = strdup ("");
+        } else {
+                g_debug ("ActUserManager: Found x11 display of session '%s': %s",
+                         new_session->id, x11_display);
         }
-
-        g_debug ("ActUserManager: Found x11 display of session '%s': %s",
-                 new_session->id, x11_display);
 
  done:
         new_session->x11_display = g_strdup (x11_display);
@@ -1697,7 +1697,7 @@ maybe_add_new_session (ActUserManagerNewSession *new_session)
 
         is_ours = TRUE;
 
-        if (new_session->x11_display == NULL || new_session->x11_display[0] == '\0') {
+        if (new_session->x11_display == NULL) {
                 g_debug ("AcUserManager: (mostly) ignoring session '%s' since it's not graphical",
                          new_session->id);
                 is_ours = FALSE;
