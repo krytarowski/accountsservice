@@ -57,7 +57,6 @@ enum {
 
 struct DaemonPrivate {
         GDBusConnection *bus_connection;
-        GDBusProxy *bus_proxy;
 
         GHashTable *users;
 
@@ -549,9 +548,6 @@ daemon_finalize (GObject *object)
         g_return_if_fail (IS_DAEMON (object));
 
         daemon = DAEMON (object);
-
-        if (daemon->priv->bus_proxy != NULL)
-                g_object_unref (daemon->priv->bus_proxy);
 
         if (daemon->priv->bus_connection != NULL)
                 g_object_unref (daemon->priv->bus_connection);
