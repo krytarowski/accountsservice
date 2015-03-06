@@ -1507,7 +1507,7 @@ _act_user_load_from_user (ActUser    *user,
         g_object_notify (G_OBJECT (user), "real-name");
 
         g_free (user->password_hint);
-        user->password_hint = g_strdup (user_to_copy->real_name);
+        user->password_hint = g_strdup (user_to_copy->password_hint);
         g_object_notify (G_OBJECT (user), "password-hint");
 
         g_free (user->home_dir);
