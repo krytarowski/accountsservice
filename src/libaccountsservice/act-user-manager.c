@@ -2117,8 +2117,6 @@ on_console_kit_session_proxy_gotten (GObject *object, GAsyncResult *result, gpoi
 static void
 get_session_proxy (ActUserManager *manager)
 {
-        g_debug ("get_session_proxy");
-
 #ifdef WITH_SYSTEMD
         if (LOGIND_RUNNING()) {
                 manager->priv->seat.state++;
@@ -2126,6 +2124,8 @@ get_session_proxy (ActUserManager *manager)
                 return;
         }
 #endif
+
+        g_debug ("ActUserManager: fetching user proxy");
 
         g_assert (manager->priv->seat.session_proxy == NULL);
 
