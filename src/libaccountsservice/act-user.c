@@ -1880,6 +1880,34 @@ act_user_set_password (ActUser             *user,
 }
 
 /**
+ * act_uset_set_password_hint:
+ * @user: the user object to alter.
+ * @hint: a hint to help user recall password
+ *
+ * Sets the password hint of @user.
+ * @hint is displayed to the user if they forget the password.
+ *
+ * Note this function is synchronous and ignores errors.
+ **/
+void
+act_user_set_password_hint (ActUser     *user,
+                            const gchar *hint)
+{
+        GError *error = NULL;
+
+        g_return_if_fail (ACT_IS_USER (user));
+        g_return_if_fail (ACCOUNTS_IS_USER (user->accounts_proxy));
+
+        if (!accounts_user_call_set_password_hint_sync (user->accounts_proxy,
+                                                        hint,
+                                                        NULL,
+                                                        &error)) {
+                g_warning ("SetPasswordHint call failed: %s", error->message);
+                g_error_free (error);
+        }
+}
+
+/**
  * act_user_set_password_mode:
  * @user: the user object to alter.
  * @password_mode: a #ActUserPasswordMode
