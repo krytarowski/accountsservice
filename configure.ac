@@ -315,3 +315,20 @@ fi
 echo
 
 
+dnl ---------------------------------------------------------------------------
+dnl - check OS
+dnl ---------------------------------------------------------------------------
+case "$host_os" in
+  *freebsd*)
+        AC_DEFINE([HAVE_FREEBSD], 1, [Is this a FreeBSD system?])
+        ;;
+  *linux*)
+        AC_DEFINE([HAVE_LINUX], 1, [Is this a Linux system?])
+        ;;
+  *netbsd*)
+        AC_DEFINE([HAVE_NETBSD], 1, [Is this a NetBSD system?])
+        ;;
+  *solaris*)
+        AC_DEFINE([HAVE_SOLARIS], 1, [Is this a Solaris system?])
+        ;;
+esac
